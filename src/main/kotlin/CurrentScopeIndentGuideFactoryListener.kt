@@ -3,18 +3,9 @@ package com.access
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.colors.EditorColors
-import com.intellij.openapi.editor.event.CaretEvent
-import com.intellij.openapi.editor.event.CaretListener
-import com.intellij.openapi.editor.event.DocumentEvent
-import com.intellij.openapi.editor.event.DocumentListener
-import com.intellij.openapi.editor.event.EditorFactoryEvent
-import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
-import com.intellij.openapi.editor.markup.CustomHighlighterRenderer
-import com.intellij.openapi.editor.markup.HighlighterLayer
-import com.intellij.openapi.editor.markup.HighlighterTargetArea
-import com.intellij.openapi.editor.markup.RangeHighlighter
-import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
 import java.awt.Graphics
 
@@ -73,7 +64,7 @@ private class CurrentScopeIndentGuideController(
 
         clearHighlight()
         val guide = computeCurrentScopeGuide() ?: return
-        val startOffset = editor.document.getLineStartOffset(guide.startLine)
+        val startOffset = editor.document.getLineStartOffset(guide.anchorLine)
         val endOffset = editor.document.getLineEndOffset(guide.endLine)
 
         val highlighter = editor.markupModel.addRangeHighlighter(
@@ -85,6 +76,7 @@ private class CurrentScopeIndentGuideController(
         )
         highlighter.customRenderer = ActiveIndentGuideRenderer(
             indentColumn = guide.indentColumn,
+            anchorLine = guide.anchorLine,
             startLine = guide.startLine,
             endLine = guide.endLine,
         )
@@ -98,49 +90,77 @@ private class CurrentScopeIndentGuideController(
 
         val caretLine = editor.caretModel.logicalPosition.line.coerceIn(0, lineCount - 1)
         val baseLine = findNearestNonBlankLine(caretLine, lineCount) ?: return null
-        val indentColumn = leadingIndentColumns(baseLine)
+        val baseIndent = leadingIndentColumns(baseLine)
+        if (baseIndent <= 0) return null
+
+        // The guide belongs to the innermost block containing the caret. That block is
+        // opened either by the base line itself (e.g. when the caret is on the `if`
+        // line) or by the nearest non-blank line above it with a smaller indentation.
+        // Anchoring the guide to that line is what IntelliJ does for regular indent
+        // guides, instead of drawing it next to the block contents.
+        val openerLine = findScopeOpenerLine(baseLine, baseIndent, lineCount) ?: return null
+        val indentColumn = leadingIndentColumns(openerLine)
         if (indentColumn <= 0) return null
 
-        var startLine = baseLine
-        for (line in baseLine - 1 downTo 0) {
-            if (isBlankLine(line)) {
-                startLine = line
-                continue
-            }
+        val startLine = openerLine + 1
+        var endLine = lineCount - 1
+        for (line in startLine until lineCount) {
+            if (isBlankLine(line)) continue
 
-            if (leadingIndentColumns(line) < indentColumn) {
+            if (leadingIndentColumns(line) <= indentColumn) {
+                endLine = line - 1
                 break
             }
-            startLine = line
-        }
-
-        var endLine = baseLine
-        for (line in baseLine + 1 until lineCount) {
-            if (isBlankLine(line)) {
-                endLine = line
-                continue
-            }
-
-            if (leadingIndentColumns(line) < indentColumn) {
-                break
-            }
-            endLine = line
         }
 
         if (startLine > endLine) return null
-        return ScopeGuide(indentColumn, startLine, endLine)
+        return ScopeGuide(indentColumn, openerLine, startLine, endLine)
+    }
+
+    private fun findScopeOpenerLine(baseLine: Int, baseIndent: Int, lineCount: Int): Int? {
+        if (opensBlock(baseLine, baseIndent, lineCount)) return baseLine
+
+        for (line in baseLine - 1 downTo 0) {
+            if (isBlankLine(line)) continue
+            if (leadingIndentColumns(line) < baseIndent) return line
+        }
+        return null
+    }
+
+    private fun opensBlock(line: Int, indent: Int, lineCount: Int): Boolean {
+        for (nextLine in line + 1 until lineCount) {
+            if (isBlankLine(nextLine)) continue
+            return leadingIndentColumns(nextLine) > indent
+        }
+        return false
     }
 
     private fun findNearestNonBlankLine(caretLine: Int, lineCount: Int): Int? {
         if (!isBlankLine(caretLine)) return caretLine
 
+        var above: Int? = null
         for (line in caretLine - 1 downTo 0) {
-            if (!isBlankLine(line)) return line
+            if (!isBlankLine(line)) {
+                above = line
+                break
+            }
         }
+        var below: Int? = null
         for (line in caretLine + 1 until lineCount) {
-            if (!isBlankLine(line)) return line
+            if (!isBlankLine(line)) {
+                below = line
+                break
+            }
         }
-        return null
+
+        return when {
+            above == null -> below
+            below == null -> above
+            // A blank line between an opener and its body belongs to the body, and so
+            // does one between the body and the line that closes the block.
+            leadingIndentColumns(below) > leadingIndentColumns(above) -> below
+            else -> above
+        }
     }
 
     private fun isBlankLine(line: Int): Boolean {
@@ -187,6 +207,7 @@ private class CurrentScopeIndentGuideController(
 
     private data class ScopeGuide(
         val indentColumn: Int,
+        val anchorLine: Int,
         val startLine: Int,
         val endLine: Int,
     )
@@ -194,15 +215,20 @@ private class CurrentScopeIndentGuideController(
 
 private class ActiveIndentGuideRenderer(
     private val indentColumn: Int,
+    private val anchorLine: Int,
     private val startLine: Int,
     private val endLine: Int,
 ) : CustomHighlighterRenderer {
     override fun paint(editor: com.intellij.openapi.editor.Editor, highlighter: RangeHighlighter, graphics: Graphics) {
         val color = editor.colorsScheme.getColor(EditorColors.INDENT_GUIDE_COLOR) ?: return
-        val startPoint = editor.logicalPositionToXY(LogicalPosition(startLine, indentColumn))
-        val endPoint = editor.logicalPositionToXY(LogicalPosition(endLine, indentColumn))
+
+        // The x coordinate is taken from the line that opens the scope (the `if` line),
+        // so the guide is aligned with it instead of with the block contents.
+        val anchor = editor.logicalPositionToXY(LogicalPosition(anchorLine, indentColumn))
+        val startY = editor.logicalPositionToXY(LogicalPosition(startLine, indentColumn)).y
+        val endY = editor.logicalPositionToXY(LogicalPosition(endLine, indentColumn)).y + editor.lineHeight
 
         graphics.color = color
-        graphics.drawLine(startPoint.x, startPoint.y, startPoint.x, endPoint.y + editor.lineHeight)
+        graphics.drawLine(anchor.x, startY, anchor.x, endY)
     }
 }
