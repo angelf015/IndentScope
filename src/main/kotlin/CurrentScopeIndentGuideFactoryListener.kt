@@ -1,13 +1,19 @@
 package com.access
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
+import java.awt.BasicStroke
 import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Point
+import java.awt.RenderingHints
+import java.awt.geom.Path2D
 
 class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener {
     private val controllers = mutableMapOf<EditorEx, CurrentScopeIndentGuideController>()
@@ -75,9 +81,7 @@ private class CurrentScopeIndentGuideController(
             HighlighterTargetArea.EXACT_RANGE,
         )
         highlighter.customRenderer = ActiveIndentGuideRenderer(
-            indentColumn = guide.indentColumn,
             anchorLine = guide.anchorLine,
-            startLine = guide.startLine,
             endLine = guide.endLine,
         )
         rangeHighlighter = highlighter
@@ -102,19 +106,60 @@ private class CurrentScopeIndentGuideController(
         val indentColumn = leadingIndentColumns(openerLine)
         if (indentColumn <= 0) return null
 
-        val startLine = openerLine + 1
-        var endLine = lineCount - 1
-        for (line in startLine until lineCount) {
+        var lastBodyLine = -1
+        var closingBraceLine = -1
+        val openerHasBlockBrace = opensBraceBlock(openerLine)
+        for (line in openerLine + 1 until lineCount) {
             if (isBlankLine(line)) continue
 
             if (leadingIndentColumns(line) <= indentColumn) {
-                endLine = line - 1
+                // The block ends at its closing brace, which is usually aligned with
+                // the line that opens it. Include that line so the guide covers the
+                // whole block instead of only the body.
+                if (openerHasBlockBrace && firstNonWhitespaceChar(line) == '}') {
+                    closingBraceLine = line
+                }
                 break
             }
+
+            lastBodyLine = line
         }
 
-        if (startLine > endLine) return null
-        return ScopeGuide(indentColumn, openerLine, startLine, endLine)
+        if (lastBodyLine < 0) return null
+
+        val endLine = if (closingBraceLine >= 0) closingBraceLine else lastBodyLine
+        return ScopeGuide(openerLine, endLine)
+    }
+
+    private fun firstNonWhitespaceChar(line: Int): Char? {
+        val document = editor.document
+        val start = document.getLineStartOffset(line)
+        val end = document.getLineEndOffset(line)
+        val text = document.charsSequence
+
+        for (i in start until end) {
+            if (!text[i].isWhitespace()) return text[i]
+        }
+        return null
+    }
+
+    /**
+     * Tells whether the line leaves a block open (its last significant brace is `{`).
+     * This keeps unbraced scopes from adopting the closing brace of an outer block.
+     */
+    private fun opensBraceBlock(line: Int): Boolean {
+        val document = editor.document
+        val start = document.getLineStartOffset(line)
+        val end = document.getLineEndOffset(line)
+        val text = document.charsSequence
+
+        for (i in end - 1 downTo start) {
+            when (text[i]) {
+                '}' -> return false
+                '{' -> return true
+            }
+        }
+        return false
     }
 
     private fun findScopeOpenerLine(baseLine: Int, baseIndent: Int, lineCount: Int): Int? {
@@ -206,29 +251,120 @@ private class CurrentScopeIndentGuideController(
     }
 
     private data class ScopeGuide(
-        val indentColumn: Int,
         val anchorLine: Int,
-        val startLine: Int,
         val endLine: Int,
     )
 }
 
 private class ActiveIndentGuideRenderer(
-    private val indentColumn: Int,
     private val anchorLine: Int,
-    private val startLine: Int,
     private val endLine: Int,
 ) : CustomHighlighterRenderer {
-    override fun paint(editor: com.intellij.openapi.editor.Editor, highlighter: RangeHighlighter, graphics: Graphics) {
-        val color = editor.colorsScheme.getColor(EditorColors.INDENT_GUIDE_COLOR) ?: return
+    override fun paint(editor: Editor, highlighter: RangeHighlighter, graphics: Graphics) {
+        val color = editor.colorsScheme.getColor(EditorColors.SELECTED_INDENT_GUIDE_COLOR)
+            ?: editor.colorsScheme.getColor(EditorColors.INDENT_GUIDE_COLOR)
+            ?: return
 
-        // The x coordinate is taken from the line that opens the scope (the `if` line),
-        // so the guide is aligned with it instead of with the block contents.
-        val anchor = editor.logicalPositionToXY(LogicalPosition(anchorLine, indentColumn))
-        val startY = editor.logicalPositionToXY(LogicalPosition(startLine, indentColumn)).y
-        val endY = editor.logicalPositionToXY(LogicalPosition(endLine, indentColumn)).y + editor.lineHeight
+        // The guide starts at the line that opens the scope (the `if` line) and ends
+        // at its closing brace, so it covers the whole block. The vertical is placed
+        // half an indent step to the left of the opener text, inside its leading
+        // whitespace, so the rounded arms have room to reach the `if` and the `}`.
+        val firstAnchor = lineTextAnchor(editor, anchorLine)
+        val lastAnchor = lineTextAnchor(editor, endLine)
+        val halfLine = editor.lineHeight / 2
 
-        graphics.color = color
-        graphics.drawLine(anchor.x, startY, anchor.x, endY)
+        val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine))?.x
+            ?: firstAnchor.x
+        val leadingWidth = (firstAnchor.x - lineStartX).coerceAtLeast(0)
+        val halfIndentStep = editor.settings.getTabSize(editor.project).coerceAtLeast(2) / 2f *
+            graphics.fontMetrics.charWidth(' ').coerceAtLeast(1)
+        val armLength = minOf(halfIndentStep, leadingWidth / 2f).toInt()
+        val guideX = firstAnchor.x - armLength
+
+        val copy = graphics.create()
+        if (copy !is Graphics2D) {
+            copy.dispose()
+            return
+        }
+
+        try {
+            copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            copy.color = color
+            copy.stroke = BasicStroke(STROKE_WIDTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            copy.draw(
+                createScopePath(
+                    guideX = guideX,
+                    firstTextX = firstAnchor.x,
+                    firstY = firstAnchor.y + halfLine,
+                    lastTextX = lastAnchor.x,
+                    lastY = lastAnchor.y + halfLine,
+                ),
+            )
+        } finally {
+            copy.dispose()
+        }
+    }
+
+    /**
+     * Position of the first non-whitespace character of the line. Using the character
+     * offset (instead of the line start) keeps the arm aligned when the text is soft
+     * wrapped and starts on a continuation visual line.
+     */
+    private fun lineTextAnchor(editor: Editor, line: Int): Point {
+        val document = editor.document
+        val lineStart = document.getLineStartOffset(line)
+        val lineEnd = document.getLineEndOffset(line)
+        val chars = document.charsSequence
+
+        var offset = lineStart
+        while (offset < lineEnd && (chars[offset] == ' ' || chars[offset] == '\t')) {
+            offset++
+        }
+        return editor.offsetToXY(offset) ?: editor.logicalPositionToXY(LogicalPosition(line, 0))
+    }
+
+    /**
+     * Builds the rounded bracket used by editors such as Neovim/snacks:
+     * a vertical line with rounded corners that turn towards the first and last
+     * lines of the scope.
+     */
+    private fun createScopePath(
+        guideX: Int,
+        firstTextX: Int,
+        firstY: Int,
+        lastTextX: Int,
+        lastY: Int,
+    ): Path2D.Float {
+        val x = guideX.toFloat()
+        val topArmEnd = maxOf(firstTextX, guideX + 1).toFloat()
+        val bottomArmEnd = maxOf(lastTextX, guideX + 1).toFloat()
+        val path = Path2D.Float()
+
+        val radius = minOf(
+            CORNER_RADIUS,
+            (topArmEnd - x).coerceAtLeast(0f),
+            (bottomArmEnd - x).coerceAtLeast(0f),
+            (lastY - firstY).toFloat() / 2f,
+        ).coerceAtLeast(0f)
+
+        val top = firstY.toFloat()
+        val bottom = lastY.toFloat()
+
+        path.moveTo(topArmEnd, top)
+        path.lineTo(x + radius, top)
+        if (radius > 0f) {
+            path.quadTo(x, top, x, top + radius)
+            path.lineTo(x, bottom - radius)
+            path.quadTo(x, bottom, x + radius, bottom)
+        } else {
+            path.lineTo(x, bottom)
+        }
+        path.lineTo(bottomArmEnd, bottom)
+        return path
+    }
+
+    private companion object {
+        private const val CORNER_RADIUS = 4f
+        private const val STROKE_WIDTH = 1.5f
     }
 }
