@@ -8,6 +8,7 @@ import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
+import com.intellij.util.Alarm
 import java.awt.BasicStroke
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -15,12 +16,16 @@ import java.awt.Point
 import java.awt.RenderingHints
 import java.awt.geom.Path2D
 
-class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener {
+class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener, Disposable {
     private val controllers = mutableMapOf<EditorEx, CurrentScopeIndentGuideController>()
+    private var disposed = false
 
     override fun editorCreated(event: EditorFactoryEvent) {
+        if (disposed) return
+
         val editor = event.editor as? EditorEx ?: return
         if (editor.isOneLineMode) return
+        if (controllers.containsKey(editor)) return
 
         controllers[editor] = CurrentScopeIndentGuideController(editor)
     }
@@ -29,15 +34,33 @@ class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener {
         val editor = event.editor as? EditorEx ?: return
         controllers.remove(editor)?.dispose()
     }
+
+    override fun dispose() {
+        if (disposed) return
+        disposed = true
+
+        controllers.values.forEach { it.dispose() }
+        controllers.clear()
+    }
 }
 
 private class CurrentScopeIndentGuideController(
     private val editor: EditorEx,
-) : CaretListener, DocumentListener {
+) : CaretListener, DocumentListener, Disposable {
 
+    // `EditorSettings` is created per editor, so this controller owns the override for
+    // its own editor only. Restoring it here cannot affect other open editors.
     private val originalIndentGuidesShown = editor.settings.isIndentGuidesShown
     private val listenerDisposable: Disposable = Disposer.newDisposable()
+    private val updateAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, listenerDisposable)
+    private val updateRequest = Runnable { updateHighlight() }
+
     private var rangeHighlighter: RangeHighlighter? = null
+    private var appliedGuide: ScopeGuide? = null
+    private var cachedGuide: ScopeGuide? = null
+    private var cachedCaretLine = -1
+    private var cachedModificationStamp = Long.MIN_VALUE
+    private var hasCachedGuide = false
     private var disposed = false
 
     init {
@@ -48,34 +71,51 @@ private class CurrentScopeIndentGuideController(
     }
 
     override fun caretPositionChanged(event: CaretEvent) {
-        updateHighlight()
+        // The guide depends on the caret line only, so horizontal moves are free.
+        if (event.oldPosition.line == event.newPosition.line) return
+        scheduleUpdate()
     }
 
     override fun documentChanged(event: DocumentEvent) {
-        updateHighlight()
+        scheduleUpdate()
     }
 
-    fun dispose() {
+    override fun dispose() {
         if (disposed) return
         disposed = true
 
-        editor.caretModel.removeCaretListener(this)
+        updateAlarm.cancelAllRequests()
+        if (!editor.isDisposed) {
+            editor.caretModel.removeCaretListener(this)
+            editor.settings.isIndentGuidesShown = originalIndentGuidesShown
+        }
         Disposer.dispose(listenerDisposable)
         clearHighlight()
-        editor.settings.isIndentGuidesShown = originalIndentGuidesShown
+    }
+
+    /**
+     * Coalesces bursts of caret/document events into a single recomputation, which
+     * keeps fast typing and rapid navigation cheap on large files.
+     */
+    private fun scheduleUpdate() {
+        if (disposed || editor.isDisposed) return
+        updateAlarm.cancelRequest(updateRequest)
+        updateAlarm.addRequest(updateRequest, UPDATE_DELAY_MS)
     }
 
     private fun updateHighlight() {
         if (disposed || editor.isDisposed) return
 
-        clearHighlight()
-        val guide = computeCurrentScopeGuide() ?: return
-        val startOffset = editor.document.getLineStartOffset(guide.anchorLine)
-        val endOffset = editor.document.getLineEndOffset(guide.endLine)
+        val guide = getCurrentGuide()
+        if (guide == appliedGuide && (guide == null || rangeHighlighter?.isValid == true)) return
 
+        clearHighlight()
+        if (guide == null) return
+
+        val document = editor.document
         val highlighter = editor.markupModel.addRangeHighlighter(
-            startOffset,
-            endOffset,
+            document.getLineStartOffset(guide.anchorLine),
+            document.getLineEndOffset(guide.endLine),
             HighlighterLayer.CARET_ROW + 1,
             TextAttributes(),
             HighlighterTargetArea.EXACT_RANGE,
@@ -85,6 +125,26 @@ private class CurrentScopeIndentGuideController(
             endLine = guide.endLine,
         )
         rangeHighlighter = highlighter
+        appliedGuide = guide
+    }
+
+    /**
+     * The scan is cached by caret line and document modification stamp, so repeated
+     * updates that cannot change the answer reuse the previous guide.
+     */
+    private fun getCurrentGuide(): ScopeGuide? {
+        val caretLine = editor.caretModel.logicalPosition.line
+        val stamp = editor.document.modificationStamp
+        if (hasCachedGuide && caretLine == cachedCaretLine && stamp == cachedModificationStamp) {
+            return cachedGuide
+        }
+
+        val guide = computeCurrentScopeGuide()
+        cachedGuide = guide
+        cachedCaretLine = caretLine
+        cachedModificationStamp = stamp
+        hasCachedGuide = true
+        return guide
     }
 
     private fun computeCurrentScopeGuide(): ScopeGuide? {
@@ -92,9 +152,12 @@ private class CurrentScopeIndentGuideController(
         val lineCount = document.lineCount
         if (lineCount == 0) return null
 
+        val chars = document.charsSequence
+        val tabSize = editor.settings.getTabSize(editor.project).coerceAtLeast(1)
+
         val caretLine = editor.caretModel.logicalPosition.line.coerceIn(0, lineCount - 1)
-        val baseLine = findNearestNonBlankLine(caretLine, lineCount) ?: return null
-        val baseIndent = leadingIndentColumns(baseLine)
+        val baseLine = findNearestNonBlankLine(chars, caretLine, lineCount, tabSize) ?: return null
+        val baseIndent = leadingIndentOrBlank(chars, baseLine, tabSize)
         if (baseIndent <= 0) return null
 
         // The guide belongs to the innermost block containing the caret. That block is
@@ -102,21 +165,22 @@ private class CurrentScopeIndentGuideController(
         // line) or by the nearest non-blank line above it with a smaller indentation.
         // Anchoring the guide to that line is what IntelliJ does for regular indent
         // guides, instead of drawing it next to the block contents.
-        val openerLine = findScopeOpenerLine(baseLine, baseIndent, lineCount) ?: return null
-        val indentColumn = leadingIndentColumns(openerLine)
+        val openerLine = findScopeOpenerLine(chars, baseLine, baseIndent, lineCount, tabSize) ?: return null
+        val indentColumn = leadingIndentOrBlank(chars, openerLine, tabSize)
         if (indentColumn <= 0) return null
 
         var lastBodyLine = -1
         var closingBraceLine = -1
-        val openerHasBlockBrace = opensBraceBlock(openerLine)
+        val openerHasBlockBrace = opensBraceBlock(chars, openerLine)
         for (line in openerLine + 1 until lineCount) {
-            if (isBlankLine(line)) continue
+            val indent = leadingIndentOrBlank(chars, line, tabSize)
+            if (indent < 0) continue
 
-            if (leadingIndentColumns(line) <= indentColumn) {
+            if (indent <= indentColumn) {
                 // The block ends at its closing brace, which is usually aligned with
                 // the line that opens it. Include that line so the guide covers the
                 // whole block instead of only the body.
-                if (openerHasBlockBrace && firstNonWhitespaceChar(line) == '}') {
+                if (openerHasBlockBrace && firstSignificantChar(chars, line) == '}') {
                     closingBraceLine = line
                 }
                 break
@@ -131,14 +195,35 @@ private class CurrentScopeIndentGuideController(
         return ScopeGuide(openerLine, endLine)
     }
 
-    private fun firstNonWhitespaceChar(line: Int): Char? {
+    /**
+     * Indentation of [line] in visual columns, or -1 when the line is blank. Blank and
+     * indentation are resolved in the same pass because scope detection walks many
+     * lines on every update.
+     */
+    private fun leadingIndentOrBlank(chars: CharSequence, line: Int, tabSize: Int): Int {
+        val document = editor.document
+        var offset = document.getLineStartOffset(line)
+        val end = document.getLineEndOffset(line)
+
+        var columns = 0
+        while (offset < end) {
+            when (chars[offset]) {
+                ' ' -> columns += 1
+                '\t' -> columns += tabSize - columns % tabSize
+                else -> return columns
+            }
+            offset++
+        }
+        return -1
+    }
+
+    private fun firstSignificantChar(chars: CharSequence, line: Int): Char? {
         val document = editor.document
         val start = document.getLineStartOffset(line)
         val end = document.getLineEndOffset(line)
-        val text = document.charsSequence
 
         for (i in start until end) {
-            if (!text[i].isWhitespace()) return text[i]
+            if (!chars[i].isWhitespace()) return chars[i]
         }
         return null
     }
@@ -147,14 +232,13 @@ private class CurrentScopeIndentGuideController(
      * Tells whether the line leaves a block open (its last significant brace is `{`).
      * This keeps unbraced scopes from adopting the closing brace of an outer block.
      */
-    private fun opensBraceBlock(line: Int): Boolean {
+    private fun opensBraceBlock(chars: CharSequence, line: Int): Boolean {
         val document = editor.document
         val start = document.getLineStartOffset(line)
         val end = document.getLineEndOffset(line)
-        val text = document.charsSequence
 
         for (i in end - 1 downTo start) {
-            when (text[i]) {
+            when (chars[i]) {
                 '}' -> return false
                 '{' -> return true
             }
@@ -162,37 +246,55 @@ private class CurrentScopeIndentGuideController(
         return false
     }
 
-    private fun findScopeOpenerLine(baseLine: Int, baseIndent: Int, lineCount: Int): Int? {
-        if (opensBlock(baseLine, baseIndent, lineCount)) return baseLine
+    private fun findScopeOpenerLine(
+        chars: CharSequence,
+        baseLine: Int,
+        baseIndent: Int,
+        lineCount: Int,
+        tabSize: Int,
+    ): Int? {
+        if (opensBlock(chars, baseLine, baseIndent, lineCount, tabSize)) return baseLine
 
         for (line in baseLine - 1 downTo 0) {
-            if (isBlankLine(line)) continue
-            if (leadingIndentColumns(line) < baseIndent) return line
+            val indent = leadingIndentOrBlank(chars, line, tabSize)
+            if (indent >= 0 && indent < baseIndent) return line
         }
         return null
     }
 
-    private fun opensBlock(line: Int, indent: Int, lineCount: Int): Boolean {
+    private fun opensBlock(
+        chars: CharSequence,
+        line: Int,
+        indent: Int,
+        lineCount: Int,
+        tabSize: Int,
+    ): Boolean {
         for (nextLine in line + 1 until lineCount) {
-            if (isBlankLine(nextLine)) continue
-            return leadingIndentColumns(nextLine) > indent
+            val nextIndent = leadingIndentOrBlank(chars, nextLine, tabSize)
+            if (nextIndent < 0) continue
+            return nextIndent > indent
         }
         return false
     }
 
-    private fun findNearestNonBlankLine(caretLine: Int, lineCount: Int): Int? {
-        if (!isBlankLine(caretLine)) return caretLine
+    private fun findNearestNonBlankLine(
+        chars: CharSequence,
+        caretLine: Int,
+        lineCount: Int,
+        tabSize: Int,
+    ): Int? {
+        if (leadingIndentOrBlank(chars, caretLine, tabSize) >= 0) return caretLine
 
         var above: Int? = null
         for (line in caretLine - 1 downTo 0) {
-            if (!isBlankLine(line)) {
+            if (leadingIndentOrBlank(chars, line, tabSize) >= 0) {
                 above = line
                 break
             }
         }
         var below: Int? = null
         for (line in caretLine + 1 until lineCount) {
-            if (!isBlankLine(line)) {
+            if (leadingIndentOrBlank(chars, line, tabSize) >= 0) {
                 below = line
                 break
             }
@@ -203,57 +305,27 @@ private class CurrentScopeIndentGuideController(
             below == null -> above
             // A blank line between an opener and its body belongs to the body, and so
             // does one between the body and the line that closes the block.
-            leadingIndentColumns(below) > leadingIndentColumns(above) -> below
+            leadingIndentOrBlank(chars, below, tabSize) >
+                leadingIndentOrBlank(chars, above, tabSize) -> below
+
             else -> above
         }
-    }
-
-    private fun isBlankLine(line: Int): Boolean {
-        val document = editor.document
-        val start = document.getLineStartOffset(line)
-        val end = document.getLineEndOffset(line)
-        val text = document.charsSequence
-
-        for (i in start until end) {
-            if (!text[i].isWhitespace()) {
-                return false
-            }
-        }
-        return true
-    }
-
-    private fun leadingIndentColumns(line: Int): Int {
-        val document = editor.document
-        val start = document.getLineStartOffset(line)
-        val end = document.getLineEndOffset(line)
-        val text = document.charsSequence
-        val tabSize = editor.settings.getTabSize(editor.project)
-
-        var columns = 0
-        for (i in start until end) {
-            when (val ch = text[i]) {
-                ' ' -> columns += 1
-                '\t' -> {
-                    val remainder = columns % tabSize
-                    columns += if (remainder == 0) tabSize else tabSize - remainder
-                }
-
-                else -> return columns
-            }
-        }
-
-        return columns
     }
 
     private fun clearHighlight() {
         rangeHighlighter?.dispose()
         rangeHighlighter = null
+        appliedGuide = null
     }
 
     private data class ScopeGuide(
         val anchorLine: Int,
         val endLine: Int,
     )
+
+    private companion object {
+        private const val UPDATE_DELAY_MS = 20
+    }
 }
 
 private class ActiveIndentGuideRenderer(
@@ -269,8 +341,9 @@ private class ActiveIndentGuideRenderer(
         // at its closing brace, so it covers the whole block. The vertical is placed
         // half an indent step to the left of the opener text, inside its leading
         // whitespace, so the rounded arms have room to reach the `if` and the `}`.
-        val firstAnchor = lineTextAnchor(editor, anchorLine)
-        val lastAnchor = lineTextAnchor(editor, endLine)
+        val chars = editor.document.charsSequence
+        val firstAnchor = lineTextAnchor(editor, chars, anchorLine)
+        val lastAnchor = lineTextAnchor(editor, chars, endLine)
         val halfLine = editor.lineHeight / 2
 
         val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine))?.x
@@ -310,11 +383,10 @@ private class ActiveIndentGuideRenderer(
      * offset (instead of the line start) keeps the arm aligned when the text is soft
      * wrapped and starts on a continuation visual line.
      */
-    private fun lineTextAnchor(editor: Editor, line: Int): Point {
+    private fun lineTextAnchor(editor: Editor, chars: CharSequence, line: Int): Point {
         val document = editor.document
         val lineStart = document.getLineStartOffset(line)
         val lineEnd = document.getLineEndOffset(line)
-        val chars = document.charsSequence
 
         var offset = lineStart
         while (offset < lineEnd && (chars[offset] == ' ' || chars[offset] == '\t')) {
