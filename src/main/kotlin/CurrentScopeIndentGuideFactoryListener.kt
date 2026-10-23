@@ -17,40 +17,33 @@ import java.awt.RenderingHints
 import java.awt.geom.Path2D
 
 class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener, Disposable {
-    private val controllers = mutableMapOf<EditorEx, CurrentScopeIndentGuideController>()
-    private var disposed = false
+    private var service: IndentScopeService? = null
+
+    private fun service(): IndentScopeService =
+        service ?: IndentScopeService.getInstance().also { service = it }
 
     override fun editorCreated(event: EditorFactoryEvent) {
-        if (disposed) return
-
         val editor = event.editor as? EditorEx ?: return
         if (editor.isOneLineMode) return
-        if (controllers.containsKey(editor)) return
 
-        controllers[editor] = CurrentScopeIndentGuideController(editor)
+        service().editorCreated(editor)
     }
 
     override fun editorReleased(event: EditorFactoryEvent) {
         val editor = event.editor as? EditorEx ?: return
-        controllers.remove(editor)?.dispose()
+        service().editorReleased(editor)
     }
 
     override fun dispose() {
-        if (disposed) return
-        disposed = true
-
-        controllers.values.forEach { it.dispose() }
-        controllers.clear()
+        service?.dispose()
+        service = null
     }
 }
 
-private class CurrentScopeIndentGuideController(
+internal class CurrentScopeIndentGuideController(
     private val editor: EditorEx,
 ) : CaretListener, DocumentListener, Disposable {
 
-    // `EditorSettings` is created per editor, so this controller owns the override for
-    // its own editor only. Restoring it here cannot affect other open editors.
-    private val originalIndentGuidesShown = editor.settings.isIndentGuidesShown
     private val listenerDisposable: Disposable = Disposer.newDisposable()
     private val updateAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, listenerDisposable)
     private val updateRequest = Runnable { updateHighlight() }
@@ -61,22 +54,45 @@ private class CurrentScopeIndentGuideController(
     private var cachedCaretLine = -1
     private var cachedModificationStamp = Long.MIN_VALUE
     private var hasCachedGuide = false
+    private var savedNativeIndentGuides: Boolean? = null
+    private var enabled = false
     private var disposed = false
 
     init {
-        editor.settings.isIndentGuidesShown = false
         editor.caretModel.addCaretListener(this)
         editor.document.addDocumentListener(this, listenerDisposable)
-        updateHighlight()
+    }
+
+    /**
+     * Activates or deactivates the custom guide. `EditorSettings` is created per
+     * editor, so the native setting is captured and restored for this editor only.
+     * The service calls this for every open editor when the global toggle changes.
+     */
+    fun setEnabled(value: Boolean) {
+        if (disposed || editor.isDisposed || enabled == value) return
+        enabled = value
+
+        if (value) {
+            savedNativeIndentGuides = editor.settings.isIndentGuidesShown
+            editor.settings.isIndentGuidesShown = false
+            updateHighlight()
+        } else {
+            updateAlarm.cancelAllRequests()
+            clearHighlight()
+            savedNativeIndentGuides?.let { editor.settings.isIndentGuidesShown = it }
+            savedNativeIndentGuides = null
+        }
     }
 
     override fun caretPositionChanged(event: CaretEvent) {
+        if (!enabled) return
         // The guide depends on the caret line only, so horizontal moves are free.
         if (event.oldPosition.line == event.newPosition.line) return
         scheduleUpdate()
     }
 
     override fun documentChanged(event: DocumentEvent) {
+        if (!enabled) return
         scheduleUpdate()
     }
 
@@ -87,7 +103,7 @@ private class CurrentScopeIndentGuideController(
         updateAlarm.cancelAllRequests()
         if (!editor.isDisposed) {
             editor.caretModel.removeCaretListener(this)
-            editor.settings.isIndentGuidesShown = originalIndentGuidesShown
+            savedNativeIndentGuides?.let { editor.settings.isIndentGuidesShown = it }
         }
         Disposer.dispose(listenerDisposable)
         clearHighlight()
@@ -98,13 +114,13 @@ private class CurrentScopeIndentGuideController(
      * keeps fast typing and rapid navigation cheap on large files.
      */
     private fun scheduleUpdate() {
-        if (disposed || editor.isDisposed) return
+        if (!enabled || disposed || editor.isDisposed) return
         updateAlarm.cancelRequest(updateRequest)
         updateAlarm.addRequest(updateRequest, UPDATE_DELAY_MS)
     }
 
     private fun updateHighlight() {
-        if (disposed || editor.isDisposed) return
+        if (!enabled || disposed || editor.isDisposed) return
 
         val guide = getCurrentGuide()
         if (guide == appliedGuide && (guide == null || rangeHighlighter?.isValid == true)) return

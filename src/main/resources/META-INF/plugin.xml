@@ -27,4 +27,15 @@
         <editorFactoryListener implementation="com.access.CurrentScopeIndentGuideFactoryListener"/>
     </extensions>
 
+    <actions>
+        <action id="IndentScope.ToggleGuide"
+                class="com.access.ToggleIndentScopeGuideAction"
+                text="IndentScope Guide"
+                description="Toggle the current-scope indent guide and restore the editor's native indent guides">
+            <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt G"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt G"/>
+        </action>
+    </actions>
+
 </idea-plugin>
