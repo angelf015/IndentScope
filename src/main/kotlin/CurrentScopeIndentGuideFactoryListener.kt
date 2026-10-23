@@ -170,18 +170,19 @@ private class CurrentScopeIndentGuideController(
         if (indentColumn <= 0) return null
 
         var lastBodyLine = -1
-        var closingBraceLine = -1
-        val openerHasBlockBrace = opensBraceBlock(chars, openerLine)
+        var closingLine = -1
+        val closer = expectedCloser(chars, openerLine)
         for (line in openerLine + 1 until lineCount) {
             val indent = leadingIndentOrBlank(chars, line, tabSize)
             if (indent < 0) continue
 
             if (indent <= indentColumn) {
-                // The block ends at its closing brace, which is usually aligned with
-                // the line that opens it. Include that line so the guide covers the
-                // whole block instead of only the body.
-                if (openerHasBlockBrace && firstSignificantChar(chars, line) == '}') {
-                    closingBraceLine = line
+                // The block ends at its closing bracket, which is usually aligned
+                // with the line that opens it. Include that line so the guide covers
+                // the whole block instead of only the body. This applies to braces
+                // as well as multi-line parentheses and brackets.
+                if (closer != null && firstSignificantChar(chars, line) == closer) {
+                    closingLine = line
                 }
                 break
             }
@@ -191,7 +192,7 @@ private class CurrentScopeIndentGuideController(
 
         if (lastBodyLine < 0) return null
 
-        val endLine = if (closingBraceLine >= 0) closingBraceLine else lastBodyLine
+        val endLine = if (closingLine >= 0) closingLine else lastBodyLine
         return ScopeGuide(openerLine, endLine)
     }
 
@@ -229,21 +230,53 @@ private class CurrentScopeIndentGuideController(
     }
 
     /**
-     * Tells whether the line leaves a block open (its last significant brace is `{`).
-     * This keeps unbraced scopes from adopting the closing brace of an outer block.
+     * Closing bracket expected for the last unmatched `(`, `[` or `{` on the line, or
+     * null when the line leaves no block open. This is what lets the guide cover
+     * multi-line parentheses and brackets, not just braces.
      */
-    private fun opensBraceBlock(chars: CharSequence, line: Int): Boolean {
+    private fun expectedCloser(chars: CharSequence, line: Int): Char? {
         val document = editor.document
         val start = document.getLineStartOffset(line)
         val end = document.getLineEndOffset(line)
 
-        for (i in end - 1 downTo start) {
-            when (chars[i]) {
-                '}' -> return false
-                '{' -> return true
+        val openers = StringBuilder()
+        var quote: Char? = null
+        var i = start
+        while (i < end) {
+            val ch = chars[i]
+            if (quote != null) {
+                when {
+                    ch == '\\' -> i++ // Skip the escaped character.
+                    ch == quote -> quote = null
+                }
+                i++
+                continue
             }
+
+            when (ch) {
+                '"', '\'' -> quote = ch
+                '/' -> if (i + 1 < end && chars[i + 1] == '/') break
+                '(', '[', '{' -> openers.append(ch)
+                ')', ']', '}' -> {
+                    val opener = when (ch) {
+                        ')' -> '('
+                        ']' -> '['
+                        else -> '{'
+                    }
+                    if (openers.isNotEmpty() && openers[openers.length - 1] == opener) {
+                        openers.setLength(openers.length - 1)
+                    }
+                }
+            }
+            i++
         }
-        return false
+
+        return when {
+            openers.isEmpty() -> null
+            openers[openers.length - 1] == '(' -> ')'
+            openers[openers.length - 1] == '[' -> ']'
+            else -> '}'
+        }
     }
 
     private fun findScopeOpenerLine(
@@ -337,10 +370,11 @@ private class ActiveIndentGuideRenderer(
             ?: editor.colorsScheme.getColor(EditorColors.INDENT_GUIDE_COLOR)
             ?: return
 
-        // The guide starts at the line that opens the scope (the `if` line) and ends
-        // at its closing brace, so it covers the whole block. The vertical is placed
-        // half an indent step to the left of the opener text, inside its leading
-        // whitespace, so the rounded arms have room to reach the `if` and the `}`.
+        // The guide starts at the line that opens the scope and ends at its closing
+        // bracket (a `}`, `)` or `]` line), so it covers the whole block. The vertical
+        // is placed half an indent step to the left of the opener text, inside its
+        // leading whitespace, so the rounded arms have room to reach the opener and
+        // the closing line.
         val chars = editor.document.charsSequence
         val firstAnchor = lineTextAnchor(editor, chars, anchorLine)
         val lastAnchor = lineTextAnchor(editor, chars, endLine)
