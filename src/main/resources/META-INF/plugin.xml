@@ -8,13 +8,17 @@
     <name>IndentScope</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor>angelf015</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
+        Highlights the indentation guide of the current scope with a rounded bracket,
+        from the line that opens the scope through its closing <code>}</code>,
+        <code>)</code> or <code>]</code>.<br>
+        Native indent guides are temporarily hidden while the custom guide is active.
+        Use <b>Ctrl+Alt+G</b> (<b>Cmd+Option+G</b> on macOS) to toggle the feature
+        and restore the native guides, for example while presenting code.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -35,6 +39,7 @@
             <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt G"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt G"/>
+            <add-to-group group-id="ViewAppearanceGroup" anchor="last"/>
         </action>
     </actions>
 

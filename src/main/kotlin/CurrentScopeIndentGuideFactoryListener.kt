@@ -16,27 +16,24 @@ import java.awt.Point
 import java.awt.RenderingHints
 import java.awt.geom.Path2D
 
-class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener, Disposable {
-    private var service: IndentScopeService? = null
-
-    private fun service(): IndentScopeService =
-        service ?: IndentScopeService.getInstance().also { service = it }
+/**
+ * Registers editors with [IndentScopeService]. The application service owns the
+ * per-editor controllers and is disposed by the platform, so the listener does not
+ * need its own lifecycle cleanup.
+ */
+class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener {
+    private val service: IndentScopeService by lazy { IndentScopeService.getInstance() }
 
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor as? EditorEx ?: return
         if (editor.isOneLineMode) return
 
-        service().editorCreated(editor)
+        service.editorCreated(editor)
     }
 
     override fun editorReleased(event: EditorFactoryEvent) {
         val editor = event.editor as? EditorEx ?: return
-        service().editorReleased(editor)
-    }
-
-    override fun dispose() {
-        service?.dispose()
-        service = null
+        service.editorReleased(editor)
     }
 }
 
@@ -53,6 +50,7 @@ internal class CurrentScopeIndentGuideController(
     private var cachedGuide: ScopeGuide? = null
     private var cachedCaretLine = -1
     private var cachedModificationStamp = Long.MIN_VALUE
+    private var cachedTabSize = -1
     private var hasCachedGuide = false
     private var savedNativeIndentGuides: Boolean? = null
     private var enabled = false
@@ -145,31 +143,36 @@ internal class CurrentScopeIndentGuideController(
     }
 
     /**
-     * The scan is cached by caret line and document modification stamp, so repeated
-     * updates that cannot change the answer reuse the previous guide.
+     * The scan is cached by caret line, document modification stamp and tab size, so
+     * repeated updates that cannot change the answer reuse the previous guide.
      */
     private fun getCurrentGuide(): ScopeGuide? {
         val caretLine = editor.caretModel.logicalPosition.line
         val stamp = editor.document.modificationStamp
-        if (hasCachedGuide && caretLine == cachedCaretLine && stamp == cachedModificationStamp) {
+        val tabSize = editor.settings.getTabSize(editor.project).coerceAtLeast(1)
+        if (hasCachedGuide &&
+            caretLine == cachedCaretLine &&
+            stamp == cachedModificationStamp &&
+            tabSize == cachedTabSize
+        ) {
             return cachedGuide
         }
 
-        val guide = computeCurrentScopeGuide()
+        val guide = computeCurrentScopeGuide(tabSize)
         cachedGuide = guide
         cachedCaretLine = caretLine
         cachedModificationStamp = stamp
+        cachedTabSize = tabSize
         hasCachedGuide = true
         return guide
     }
 
-    private fun computeCurrentScopeGuide(): ScopeGuide? {
+    private fun computeCurrentScopeGuide(tabSize: Int): ScopeGuide? {
         val document = editor.document
         val lineCount = document.lineCount
         if (lineCount == 0) return null
 
         val chars = document.charsSequence
-        val tabSize = editor.settings.getTabSize(editor.project).coerceAtLeast(1)
 
         val caretLine = editor.caretModel.logicalPosition.line.coerceIn(0, lineCount - 1)
         val baseLine = findNearestNonBlankLine(chars, caretLine, lineCount, tabSize) ?: return null
@@ -362,7 +365,11 @@ internal class CurrentScopeIndentGuideController(
     }
 
     private fun clearHighlight() {
-        rangeHighlighter?.dispose()
+        // Avoid touching the markup model of an editor that the platform has already
+        // disposed; the highlighter is gone with it.
+        if (!editor.isDisposed) {
+            rangeHighlighter?.dispose()
+        }
         rangeHighlighter = null
         appliedGuide = null
     }
