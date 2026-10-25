@@ -79,7 +79,7 @@ Useful commands while configuring:
 The installable ZIP is generated at:
 
 ```
-build/distributions/IndentScope-1.0.0-SNAPSHOT.zip
+build/distributions/IndentScope-1.0.1-SNAPSHOT.zip
 ```
 
 Install it from **Settings → Plugins → Install Plugin from Disk**.
