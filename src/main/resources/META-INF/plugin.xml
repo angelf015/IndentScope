@@ -8,17 +8,21 @@
     <name>IndentScope</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor>angelf015</vendor>
+    <vendor url="https://github.com/angelf015/IndentScope">neoPlus</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
         Highlights the indentation guide of the current scope with a rounded bracket,
         from the line that opens the scope through its closing <code>}</code>,
-        <code>)</code> or <code>]</code>.<br>
-        Native indent guides are temporarily hidden while the custom guide is active.
-        Use <b>Ctrl+Alt+G</b> (<b>Cmd+Option+G</b> on macOS) to toggle the feature
-        and restore the native guides, for example while presenting code.
+        <code>)</code> or <code>]</code>.
+        <br><br>
+        Native indent guides are hidden only while the custom guide is active, and each
+        editor's original setting is restored when the feature is disabled.
+        <br><br>
+        Toggle it with <b>Ctrl+Alt+G</b> (<b>Cmd+Option+G</b> on macOS), from
+        <b>View → Appearance → IndentScope Guide</b>, or through the stable
+        <code>IndentScope.ToggleGuide</code> action ID for IdeaVim.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.

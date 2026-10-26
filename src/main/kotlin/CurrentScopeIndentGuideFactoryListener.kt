@@ -2,18 +2,13 @@ package com.access
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.Alarm
-import java.awt.BasicStroke
-import java.awt.Graphics
-import java.awt.Graphics2D
-import java.awt.Point
-import java.awt.RenderingHints
+import java.awt.*
 import java.awt.geom.Path2D
 
 /**
@@ -23,6 +18,12 @@ import java.awt.geom.Path2D
  */
 class CurrentScopeIndentGuideFactoryListener : EditorFactoryListener {
     private val service: IndentScopeService by lazy { IndentScopeService.getInstance() }
+
+    init {
+        // When the plugin is installed dynamically, the IDE does not recreate the
+        // editors that are already open, so the factory listener would never see them.
+        service.registerOpenEditors()
+    }
 
     override fun editorCreated(event: EditorFactoryEvent) {
         val editor = event.editor as? EditorEx ?: return
@@ -403,8 +404,7 @@ private class ActiveIndentGuideRenderer(
         val lastAnchor = lineTextAnchor(editor, chars, endLine)
         val halfLine = editor.lineHeight / 2
 
-        val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine))?.x
-            ?: firstAnchor.x
+        val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine)).x
         val leadingWidth = (firstAnchor.x - lineStartX).coerceAtLeast(0)
         val halfIndentStep = editor.settings.getTabSize(editor.project).coerceAtLeast(2) / 2f *
             graphics.fontMetrics.charWidth(' ').coerceAtLeast(1)
@@ -449,7 +449,7 @@ private class ActiveIndentGuideRenderer(
         while (offset < lineEnd && (chars[offset] == ' ' || chars[offset] == '\t')) {
             offset++
         }
-        return editor.offsetToXY(offset) ?: editor.logicalPositionToXY(LogicalPosition(line, 0))
+        return editor.offsetToXY(offset)
     }
 
     /**

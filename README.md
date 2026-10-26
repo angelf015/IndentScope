@@ -1,5 +1,10 @@
 # IndentScope
 
+[![Build](https://github.com/angelf015/IndentScope/actions/workflows/build.yml/badge.svg)](https://github.com/angelf015/IndentScope/actions/workflows/build.yml)
+[![JetBrains Marketplace](https://img.shields.io/jetbrains/plugin/v/35438-indentscope.svg)](https://plugins.jetbrains.com/plugin/35438-indentscope)
+[![Downloads](https://img.shields.io/jetbrains/plugin/d/35438-indentscope.svg)](https://plugins.jetbrains.com/plugin/35438-indentscope)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 IntelliJ Platform plugin that highlights the indent guide of the **current scope** with a rounded bracket and hides the
 native indent guides while it is active.
 
@@ -24,6 +29,23 @@ fun main() {
 - Hides native indent guides only while the custom guide is active.
 - Restores the native indent-guide setting of each editor when disabled.
 - Optional unbraced scopes end at their last body line; they never borrow the closing bracket of an outer block.
+
+## Installation
+
+From the IDE:
+
+1. Open **Settings → Plugins → Marketplace**.
+2. Search for **IndentScope** and click **Install**.
+3. Restart the IDE if it asks to.
+
+You can also open the [Marketplace page](https://plugins.jetbrains.com/plugin/35438-indentscope) directly.
+
+From a downloaded release:
+
+1. Download `IndentScope-1.2.1.zip` from the
+   [releases page](https://github.com/angelf015/IndentScope/releases).
+2. Open **Settings → Plugins**, click the gear icon → **Install Plugin from Disk...**, and select the ZIP.
+3. Restart the IDE if it asks to.
 
 ## Toggle the guide
 
@@ -67,22 +89,40 @@ Useful commands while configuring:
 
 ## Requirements
 
-- IntelliJ Platform 2025.3+ (build 253+).
+- IntelliJ Platform 2025.2+ (build 252+), including 2025.3 and 2026.x.
+- Verified with IntelliJ IDEA 2025.2.6.3 and 2026.2.3.
 - The plugin does not depend on a specific language plugin.
 
 ## Build
 
+Requirements: JDK 21. The Gradle wrapper downloads the rest.
+
 ```bash
-./gradlew buildPlugin
+./gradlew build buildPlugin verifyPluginStructure
 ```
 
 The installable ZIP is generated at:
 
 ```
-build/distributions/IndentScope-1.0.1-SNAPSHOT.zip
+build/distributions/IndentScope-1.2.1.zip
 ```
 
 Install it from **Settings → Plugins → Install Plugin from Disk**.
+
+If the IDE offers to restart after installing or updating the plugin, restart it. Current versions also register editors
+that were already open when the plugin was loaded dynamically, but a restart guarantees a clean state.
+
+To run a sandbox IDE with the plugin installed:
+
+```bash
+./gradlew runIde
+```
+
+To check binary compatibility against the supported IDEs:
+
+```bash
+./gradlew verifyPlugin
+```
 
 ## Tests
 
@@ -108,3 +148,12 @@ src/main/resources/META-INF/
 src/test/kotlin/com/access/
 └── IndentScopeToggleTest.kt                   Platform regression tests
 ```
+
+## Contributing
+
+Issues and pull requests are welcome at
+[github.com/angelf015/IndentScope](https://github.com/angelf015/IndentScope).
+
+## License
+
+Released under the [Apache License 2.0](LICENSE).

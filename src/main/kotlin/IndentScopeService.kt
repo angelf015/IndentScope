@@ -3,7 +3,10 @@ package com.access
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 
 /**
@@ -29,6 +32,7 @@ class IndentScopeService : Disposable {
             // The two-arg overload would silently unset the key for `false`, making
             // the getter fall back to `true` and breaking the next toggle.
             PropertiesComponent.getInstance().setValue(ENABLED_KEY, value, true)
+            registerOpenEditors()
             controllers.values.toList().forEach { it.setEnabled(value) }
         }
 
@@ -38,6 +42,37 @@ class IndentScopeService : Disposable {
         val controller = CurrentScopeIndentGuideController(editor)
         controllers[editor] = controller
         controller.setEnabled(enabled)
+    }
+
+    /**
+     * Registers editors that already exist when the plugin is loaded dynamically
+     * (for example, after installing it from disk while the IDE is running). Editor
+     * factory listeners only receive editors created after registration, so without
+     * this step the current editor would stay without a controller until it is closed
+     * and reopened.
+     */
+    fun registerOpenEditors() {
+        if (disposed) return
+        val application = ApplicationManager.getApplication()
+        if (application.isDispatchThread) {
+            registerOpenEditorsNow()
+        } else {
+            application.invokeLater({ registerOpenEditorsNow() }, ModalityState.nonModal())
+        }
+    }
+
+    private fun registerOpenEditorsNow() {
+        if (disposed) return
+        val before = controllers.size
+        EditorFactory.getInstance().allEditors.forEach { editor ->
+            val editorEx = editor as? EditorEx ?: return@forEach
+            if (editorEx.isDisposed || editorEx.isOneLineMode) return@forEach
+            editorCreated(editorEx)
+        }
+        val added = controllers.size - before
+        if (added > 0) {
+            LOG.info("IndentScope: registered $added open editor(s)")
+        }
     }
 
     fun editorReleased(editor: EditorEx) {
@@ -55,6 +90,7 @@ class IndentScopeService : Disposable {
 
     companion object {
         private const val ENABLED_KEY = "IndentScope.enabled"
+        private val LOG = Logger.getInstance(IndentScopeService::class.java)
 
         fun getInstance(): IndentScopeService =
             ApplicationManager.getApplication().getService(IndentScopeService::class.java)

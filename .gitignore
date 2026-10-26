@@ -1,4 +1,23 @@
-.gradle
-.idea
-.intellijPlatform
-build
+# Gradle
+.gradle/
+build/
+.kotlin/
+
+# IntelliJ Platform Gradle Plugin caches
+.intellijPlatform/
+
+# IntelliJ IDEA / other IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Local configuration and logs
+local.properties
+*.log
+*.hprof
+captures/
+
+# macOS
+.DS_Store

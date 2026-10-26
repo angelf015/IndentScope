@@ -2,6 +2,7 @@ package com.access
 
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionUiKind
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
@@ -61,11 +62,13 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         activate(editor)
         try {
             val action = ToggleIndentScopeGuideAction()
-            val event = AnActionEvent.createFromAnAction(
+            val event = AnActionEvent.createEvent(
                 action,
+                DataContext.EMPTY_CONTEXT,
                 null,
                 "IndentScopeTest",
-                DataContext.EMPTY_CONTEXT,
+                ActionUiKind.NONE,
+                null,
             )
 
             action.actionPerformed(event)
@@ -177,6 +180,20 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
                 "The guide must not borrow the closing brace of the outer block",
                 guide.endOffset < document.getLineStartOffset(3),
             )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testRegisterOpenEditorsCoversExistingEditors() {
+        val editor = configureBlockEditor()
+        service.editorReleased(editor)
+        try {
+            assertFalse("Editor should start without a controller", hasCustomGuide(editor))
+
+            service.registerOpenEditors()
+
+            assertTrue("Registering open editors should install the guide", hasCustomGuide(editor))
         } finally {
             service.editorReleased(editor)
         }
