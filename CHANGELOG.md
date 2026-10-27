@@ -7,6 +7,9 @@
 ### Added
 
 - Lifecycle regression tests for controller/service disposal and concurrent editor registration.
+- Opt-in guides for scopes that start at column 0, such as top-level DTOs and Python modules. The new **Show the guide
+  for scopes that start at column 0** setting is off by default and can be enabled in **Settings → Tools →
+  IndentScope**.
 - CI matrix on Ubuntu, macOS and Windows, Gradle wrapper validation, ktlint and Kover coverage reports.
 - Compatibility verification against IntelliJ IDEA 2025.3.6.1, 2026.1.5 and Android Studio 2026.2.1.8.
 
@@ -64,10 +67,10 @@
 
 - The guide now reaches the closing `}` of a method or constructor whose declaration spans multiple lines, instead of
   stopping at the last body line.
-- Classes without methods, such as Lombok DTOs, now show their class-level guide. For a top-level class the guide is
-  drawn at the first character of the class declaration because there is no indentation space to its left.
-- The column-0 guide shown for top-level DTOs no longer draws the tiny one-pixel end arms, which looked like stray
-  dots. It is now a clean vertical line.
+- Classes without methods, such as Lombok DTOs, now show their class-level guide.
+- Column-0 guides no longer draw the tiny one-pixel end arms, which looked like stray dots. They are now plain vertical
+  lines that start just below the opener line and end just above the closing line, so they never overlap the
+  declaration or its brace. Unbraced scopes, such as a top-level Python `def`, cover their last body line.
 - Brackets inside strings, comments, backtick template literals, triple-quoted/raw strings and C# verbatim strings no
   longer end the current scope early.
 - Allman-style declarations now start the guide at the declaration line instead of the `{` line.

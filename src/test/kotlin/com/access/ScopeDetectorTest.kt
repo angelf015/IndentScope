@@ -23,6 +23,7 @@ class ScopeDetectorTest {
         assertNotNull("A top-level Python function is a real scope", guide)
         assertEquals(0, guide!!.anchorLine)
         assertEquals(2, guide.endLine)
+        assertFalse("An unbraced scope ends at its last body line", guide.endsAtClosingLine)
     }
 
     @Test
@@ -70,6 +71,31 @@ class ScopeDetectorTest {
         assertNotNull(guide)
         assertEquals(0, guide!!.anchorLine)
         assertEquals(2, guide.endLine)
+    }
+
+    @Test
+    fun topLevelGuideIsMarkedAtColumnZero() {
+        val guide = detect(
+            text = "public class UserDto {\n    private String name;\n    private int age;\n}\n",
+            caretLine = 1,
+        )
+
+        assertNotNull(guide)
+        assertTrue("A top-level type starts at column 0", guide!!.columnZero)
+        assertTrue("The guide ends at the class's closing brace", guide.endsAtClosingLine)
+    }
+
+    @Test
+    fun nestedGuideIsNotMarkedAtColumnZero() {
+        val guide = detect(
+            text = "public class Outer {\n    public class Inner {\n        int value;\n    }\n}\n",
+            caretLine = 2,
+        )
+
+        assertNotNull(guide)
+        assertEquals(1, guide!!.anchorLine)
+        assertFalse("An indented nested type is not at column 0", guide.columnZero)
+        assertTrue("The guide ends at the nested type's closing brace", guide.endsAtClosingLine)
     }
 
     @Test

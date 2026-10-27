@@ -22,7 +22,7 @@ Requiere JDK 21 (el build declara el toolchain explícitamente).
 ./gradlew verifyPlugin
 ```
 
-El build ejecuta **88 tests** (60 de plataforma/integración, 23 puros, 3 de rendimiento y 2 de bundles) y ktlint.
+El build ejecuta **99 tests** (69 de plataforma/integración, 25 puros, 3 de rendimiento y 2 de bundles) y ktlint.
 Resultado esperado de `verifyPlugin`:
 
 ```

@@ -73,6 +73,8 @@ internal class TextLineMap(private val text: CharSequence) : LineMap {
 internal data class ScopeGuide(
     val anchorLine: Int,
     val endLine: Int,
+    val columnZero: Boolean = false,
+    val endsAtClosingLine: Boolean = false,
 )
 
 /**
@@ -137,7 +139,16 @@ internal class ScopeDetector(
             // an unusual indentation or a bracket-looking token inside a string.
             // A block that opens and closes on the same line has no vertical extent,
             // so it intentionally shows no guide.
-            return if (knownEndLine > openerLine) ScopeGuide(scope.anchorLine, knownEndLine) else null
+            return if (knownEndLine > openerLine) {
+                ScopeGuide(
+                    anchorLine = scope.anchorLine,
+                    endLine = knownEndLine,
+                    columnZero = indentColumn == 0,
+                    endsAtClosingLine = true,
+                )
+            } else {
+                null
+            }
         }
 
         var lastBodyLine = -1
@@ -168,7 +179,12 @@ internal class ScopeDetector(
         if (lastBodyLine < 0) return null
 
         val endLine = if (closingLine >= 0) closingLine else lastBodyLine
-        return ScopeGuide(scope?.anchorLine ?: openerLine, endLine)
+        return ScopeGuide(
+            anchorLine = scope?.anchorLine ?: openerLine,
+            endLine = endLine,
+            columnZero = indentColumn == 0,
+            endsAtClosingLine = closingLine >= 0,
+        )
     }
 
     /**

@@ -31,6 +31,7 @@ class IndentScopeSettings : PersistentStateComponent<IndentScopeSettings.State> 
         var enabled: Boolean = true,
         var keepNativeGuides: Boolean = false,
         var showOnlyInActiveEditor: Boolean = false,
+        var showColumnZeroGuide: Boolean = false,
         var showBraceScopes: Boolean = true,
         var showParenScopes: Boolean = true,
         var showBracketScopes: Boolean = true,

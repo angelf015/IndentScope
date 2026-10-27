@@ -21,34 +21,61 @@ internal class ActiveIndentGuideRenderer(
     private val endLine: Int,
     private val strokeWidth: Float,
     private val cornerRadius: Float,
+    private val columnZero: Boolean,
+    private val endsAtClosingLine: Boolean,
     internal val customColor: Color?,
 ) : CustomHighlighterRenderer {
     override fun paint(editor: Editor, highlighter: RangeHighlighter, graphics: Graphics) {
         val color = customColor ?: IndentScopeColors.guideColor(editor.colorsScheme) ?: return
 
-        // The guide starts at the line that opens the scope and ends at its closing
-        // bracket (a `}`, `)` or `]` line), so it covers the whole block. The vertical
-        // is placed half an indent step to the left of the opener text, inside its
-        // leading whitespace, so the rounded arms have room to reach the opener and
-        // the closing line. At column 0 there is no leading whitespace, so the guide
-        // falls back to the first character of the opener line and is drawn as a
-        // plain vertical line: a one-pixel arm there looks like a stray dot. The
-        // stroke width and radius are logical pixels; the editor's Graphics2D already
-        // applies the HiDPI scale, so applying it again here would double the size.
+        // The guide spans the scope: it starts on the line that opens it and ends at
+        // the closing bracket (a `}`, `)` or `]` line). Indented guides sit half an
+        // indent step to the left of the opener text, inside its leading whitespace,
+        // so the rounded arms have room to reach the opener and the closing line. At
+        // column 0 there is no leading whitespace, so the guide falls back to the
+        // first character and is drawn as a plain vertical line without arms: a
+        // one-pixel arm there would look like a stray dot. The stroke width and radius
+        // are logical pixels; the editor's Graphics2D already applies the HiDPI scale,
+        // so applying it again here would double the size.
         val chars = editor.document.charsSequence
         val firstAnchor = lineTextAnchor(editor, chars, anchorLine) ?: return
         val lastAnchor = lineTextAnchor(editor, chars, endLine) ?: return
         val lineHeight = editor.lineHeight
         if (lineHeight <= 0) return
 
-        val halfLine = lineHeight / 2
         val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine)).x
         val leadingWidth = (firstAnchor.x - lineStartX).coerceAtLeast(0)
         val halfIndentStep = editor.settings.getTabSize(editor.project).coerceAtLeast(2) / 2f *
             graphics.fontMetrics.charWidth(' ').coerceAtLeast(1)
         val armLength = minOf(halfIndentStep, leadingWidth / 2f).toInt()
         val guideX = firstAnchor.x - armLength
-        val drawArms = armLength > 0
+        val drawArms = !columnZero && armLength > 0
+
+        // Armed guides join the middle of the opener and closing lines. Column-0
+        // guides have no arms, so they run from below the first logical line to above
+        // the last one: above the closing bracket when there is one, or to the bottom
+        // of the last body line for unbraced scopes such as Python's `def`.
+        val firstLineBottomY = if (columnZero) {
+            val anchorEnd = editor.document.getLineEndOffset(anchorLine)
+            editor.visualLineToY(editor.offsetToVisualLine(anchorEnd, true)) + lineHeight
+        } else {
+            firstAnchor.y + lineHeight
+        }
+        val lastLineTopY = if (columnZero) {
+            val endStart = editor.document.getLineStartOffset(endLine)
+            editor.visualLineToY(editor.offsetToVisualLine(endStart, false))
+        } else {
+            lastAnchor.y
+        }
+        val lastLineBottomY = lastLineTopY + lineHeight
+        val verticalExtent = guideVerticalExtent(
+            firstLineTopY = firstAnchor.y,
+            firstLineBottomY = firstLineBottomY,
+            lastLineTopY = lastLineTopY,
+            lastLineBottomY = lastLineBottomY,
+            joinLineCenters = !columnZero,
+            endsAtClosingLine = endsAtClosingLine,
+        ) ?: return
 
         val copy = graphics.create()
         if (copy !is Graphics2D) {
@@ -61,16 +88,29 @@ internal class ActiveIndentGuideRenderer(
             copy.color = color
             copy.stroke = BasicStroke(
                 strokeWidth.coerceAtLeast(MIN_STROKE_WIDTH),
-                BasicStroke.CAP_ROUND,
+                if (drawArms) BasicStroke.CAP_ROUND else BasicStroke.CAP_BUTT,
                 BasicStroke.JOIN_ROUND,
             )
+            if (columnZero) {
+                // Antialiased butt caps can bleed one device row past the path
+                // endpoint. Clip the stroke to the exact band between the opener and
+                // the last line so the guide never touches either of them. Unbraced
+                // scopes include their last body line, so the band reaches its bottom.
+                val clipBottom = if (endsAtClosingLine) lastLineTopY else lastLineBottomY
+                copy.clipRect(
+                    0,
+                    firstLineBottomY,
+                    maxOf(editor.contentComponent.width, guideX + 1),
+                    clipBottom - firstLineBottomY,
+                )
+            }
             copy.draw(
                 createScopePath(
                     guideX = guideX,
                     firstTextX = firstAnchor.x,
-                    firstY = firstAnchor.y + halfLine,
+                    firstY = verticalExtent.first,
                     lastTextX = lastAnchor.x,
-                    lastY = lastAnchor.y + halfLine,
+                    lastY = verticalExtent.last,
                     drawArms = drawArms,
                     cornerRadius = cornerRadius,
                     hiddenYRanges = softWrapBreakRanges(
@@ -236,3 +276,30 @@ private fun visibleVerticalSegments(
 }
 
 private const val DEFAULT_CORNER_RADIUS = 4f
+
+/**
+ * Computes the vertical extent of the guide. Guides that join line centers reach
+ * the middle of the opener and closing lines so the rounded corners can touch the
+ * text. Column-0 guides have no arms, so they run from the bottom of the opener
+ * line to the top of the closing line and never overlap either line. Returns null
+ * when there is no vertical space to paint, such as a scope that opens and closes
+ * on adjacent lines.
+ */
+internal fun guideVerticalExtent(
+    firstLineTopY: Int,
+    firstLineBottomY: Int,
+    lastLineTopY: Int,
+    lastLineBottomY: Int,
+    joinLineCenters: Boolean,
+    endsAtClosingLine: Boolean = true,
+): IntRange? {
+    val top = if (joinLineCenters) firstLineTopY + (firstLineBottomY - firstLineTopY) / 2 else firstLineBottomY
+    val bottom = if (joinLineCenters) {
+        lastLineTopY + (lastLineBottomY - lastLineTopY) / 2
+    } else if (endsAtClosingLine) {
+        lastLineTopY
+    } else {
+        lastLineBottomY
+    }
+    return if (bottom > top) top..bottom else null
+}

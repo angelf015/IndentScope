@@ -88,6 +88,78 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         )
     }
 
+    fun testColumnZeroGuideRunsBelowFirstLineAndAboveLastLine() {
+        val extent = guideVerticalExtent(
+            firstLineTopY = 10,
+            firstLineBottomY = 30,
+            lastLineTopY = 50,
+            lastLineBottomY = 70,
+            joinLineCenters = false,
+            endsAtClosingLine = true,
+        )
+        assertNotNull(extent)
+        assertEquals(
+            "A column-0 guide must start below the line that opens the scope",
+            30,
+            extent!!.first,
+        )
+        assertEquals(
+            "A column-0 guide must end above the closing line",
+            50,
+            extent.last,
+        )
+    }
+
+    fun testColumnZeroGuideCoversUnbracedLastBodyLine() {
+        val extent = guideVerticalExtent(
+            firstLineTopY = 10,
+            firstLineBottomY = 30,
+            lastLineTopY = 50,
+            lastLineBottomY = 70,
+            joinLineCenters = false,
+            endsAtClosingLine = false,
+        )
+        assertNotNull(extent)
+        assertEquals(
+            "An unbraced scope starts below its first line",
+            30,
+            extent!!.first,
+        )
+        assertEquals(
+            "An unbraced scope must cover its last body line",
+            70,
+            extent.last,
+        )
+    }
+
+    fun testArmedGuideStillJoinsLineCenters() {
+        val extent = guideVerticalExtent(
+            firstLineTopY = 10,
+            firstLineBottomY = 30,
+            lastLineTopY = 50,
+            lastLineBottomY = 70,
+            joinLineCenters = true,
+            endsAtClosingLine = true,
+        )
+        assertNotNull(extent)
+        assertEquals("Armed guides keep the existing top position", 20, extent!!.first)
+        assertEquals("Armed guides keep the existing bottom position", 60, extent.last)
+    }
+
+    fun testAdjacentColumnZeroLinesHaveNoGuide() {
+        assertNull(
+            "There is no room between adjacent opener and closing lines",
+            guideVerticalExtent(
+                firstLineTopY = 10,
+                firstLineBottomY = 30,
+                lastLineTopY = 30,
+                lastLineBottomY = 50,
+                joinLineCenters = false,
+                endsAtClosingLine = true,
+            ),
+        )
+    }
+
     private val service: IndentScopeService
         get() = ApplicationManager.getApplication().getService(IndentScopeService::class.java)
 
@@ -96,6 +168,12 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
     override fun setUp() {
         super.setUp()
         originalSettings = IndentScopeSettings.getInstance().getState().copy()
+        // Most integration fixtures use top-level scopes at column 0. Keep the
+        // historical visibility for those tests; the opt-in default and the new
+        // vertical geometry have dedicated tests below.
+        IndentScopeSettings.getInstance().apply(
+            IndentScopeSettings.getInstance().getState().copy(showColumnZeroGuide = true),
+        )
     }
 
     override fun tearDown() {
@@ -179,6 +257,10 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         settings.apply(IndentScopeSettings.State())
 
         assertTrue("The guide is enabled by default", settings.enabled)
+        assertFalse(
+            "Guides for scopes starting at column 0 are off by default",
+            settings.getState().showColumnZeroGuide,
+        )
         assertEquals(IndentScopeSettings.State(), settings.getState())
 
         settings.enabled = false
@@ -190,6 +272,129 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
 
         settings.enabled = true
         assertTrue(settings.getState().enabled)
+    }
+
+    fun testColumnZeroGuideIsHiddenByDefault() {
+        val editor = configureTopLevelDtoEditor()
+        updateSettings { showColumnZeroGuide = false }
+        activate(editor)
+        try {
+            assertFalse(
+                "A scope starting at column 0 must not draw a guide by default",
+                hasCustomGuide(editor),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testColumnZeroGuideCanBeEnabled() {
+        val editor = configureTopLevelDtoEditor()
+        updateSettings { showColumnZeroGuide = true }
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testColumnZeroGuideFollowsSettingChanges() {
+        val editor = configureTopLevelDtoEditor()
+        updateSettings { showColumnZeroGuide = false }
+        activate(editor)
+        try {
+            assertFalse("The guide starts hidden", hasCustomGuide(editor))
+
+            updateSettings { showColumnZeroGuide = true }
+            assertGuideSpansLines(editor, startLine = 0, endLine = 3)
+
+            updateSettings { showColumnZeroGuide = false }
+            assertFalse(
+                "Disabling the setting must remove the guide without recreating the editor",
+                hasCustomGuide(editor),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testColumnZeroUnbracedGuideCoversLastBodyLine() {
+        myFixture.configureByText(
+            "Example.py",
+            "def greet():\n    first()\n    second()\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 6))
+        updateSettings {
+            showColumnZeroGuide = true
+            customColorEnabled = true
+            customColorRgb = 0xFF0000
+        }
+        activate(editor)
+        try {
+            val highlighter = customGuide(editor)
+            assertNotNull("The column-0 Python guide should be visible", highlighter)
+            val image = paintGuide(editor, highlighter!!)
+
+            val document = editor.document
+            val guideX = editor.offsetToXY(document.getLineStartOffset(0)).x
+            val lastLineTop = editor.visualLineToY(
+                editor.offsetToVisualLine(document.getLineStartOffset(2), false),
+            )
+            assertTrue(
+                "The guide should cover the last body line",
+                hasPaintedPixel(image, guideX, lastLineTop + editor.lineHeight - 3),
+            )
+            assertFalse(
+                "The guide must stop at the bottom of the last body line",
+                hasPaintedPixel(image, guideX, lastLineTop + editor.lineHeight + 3),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testColumnZeroGuidePaintAvoidsFirstAndLastLines() {
+        val editor = configureTopLevelDtoEditor()
+        updateSettings {
+            showColumnZeroGuide = true
+            customColorEnabled = true
+            customColorRgb = 0xFF0000
+        }
+        activate(editor)
+        try {
+            val highlighter = customGuide(editor)
+            assertNotNull("The column-0 guide should be visible", highlighter)
+            val image = paintGuide(editor, highlighter!!)
+
+            val document = editor.document
+            val guideX = editor.offsetToXY(document.getLineStartOffset(0)).x
+            val firstLineBottom = editor.visualLineToY(
+                editor.offsetToVisualLine(document.getLineEndOffset(0), true),
+            ) + editor.lineHeight
+            val lastLineTop = editor.visualLineToY(
+                editor.offsetToVisualLine(document.getLineStartOffset(3), false),
+            )
+            assertTrue(
+                "The guide should start below the declaration line",
+                hasPaintedPixel(image, guideX, firstLineBottom + 3),
+            )
+            assertFalse(
+                "The guide must not cross the declaration line",
+                hasPaintedPixel(image, guideX, firstLineBottom - 3),
+            )
+            assertTrue(
+                "The guide should reach the space above the closing line",
+                hasPaintedPixel(image, guideX, lastLineTop - 3),
+            )
+            assertFalse(
+                "The guide must not cross the closing line",
+                hasPaintedPixel(image, guideX, lastLineTop + 3),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
     }
 
     fun testLegacyEnabledValueIsMigrated() {
@@ -1383,6 +1588,21 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         return editor
     }
 
+    private fun configureTopLevelDtoEditor(): EditorEx {
+        myFixture.configureByText(
+            "UserDto.java",
+            """
+            public class UserDto {
+                private final String name;
+                private final int age;
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 8))
+        return editor
+    }
+
     private fun activate(editor: EditorEx) {
         IndentScopeSettings.getInstance().enabled = true
         // The fixture editor is registered by the plugin listener as soon as it is
@@ -1418,6 +1638,29 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
     }
 
     private fun hasCustomGuide(editor: EditorEx): Boolean = customGuide(editor) != null
+
+    private fun paintGuide(editor: EditorEx, highlighter: RangeHighlighter): BufferedImage {
+        val image = BufferedImage(300, 400, BufferedImage.TYPE_INT_ARGB)
+        val graphics = image.createGraphics()
+        try {
+            highlighter.customRenderer!!.paint(editor, highlighter, graphics)
+        } finally {
+            graphics.dispose()
+        }
+        return image
+    }
+
+    private fun hasPaintedPixel(image: BufferedImage, x: Int, y: Int): Boolean {
+        for (dx in -2..2) {
+            for (dy in -2..2) {
+                val px = x + dx
+                val py = y + dy
+                if (px !in 0 until image.width || py !in 0 until image.height) continue
+                if (image.getRGB(px, py) ushr 24 != 0) return true
+            }
+        }
+        return false
+    }
 
     private companion object {
         private const val LEGACY_ENABLED_KEY = "IndentScope.enabled"

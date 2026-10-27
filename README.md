@@ -24,7 +24,8 @@ fun main() {
 
 - Rounded indent guide for the scope containing the caret.
 - Supports scopes closed by `}`, `)` and `]`.
-- Shows the class-level guide for DTOs and other classes without methods.
+- Shows the class-level guide for DTOs and other classes without methods. Guides for scopes that start at column 0 are
+  opt-in.
 - Works with nested blocks and multi-line calls/conditions.
 - Shows top-level unbraced scopes, such as Python `def` and `class` blocks.
 - Shows multi-line empty blocks; single-line blocks intentionally draw no vertical guide.
@@ -89,6 +90,7 @@ Open **Settings → Tools → IndentScope** to customize the plugin:
 | Enable IndentScope guide | On | Global toggle, equivalent to the action and the status-bar widget. |
 | Keep native indent guides visible | Off | Draws the custom guide without hiding the IDE's indentation guides. |
 | Show the guide only in the active editor | Off | Useful with split editors: only the pane with keyboard focus shows the custom guide. |
+| Show the guide for scopes that start at column 0 | Off | Draws guides for scopes whose opener starts at column 0, such as top-level DTOs. |
 | Blocks `{ }` | On | Enables guides for brace-delimited scopes, including indentation-only Python blocks. |
 | Parentheses `( )` | On | Enables guides for multi-line parentheses. |
 | Brackets `[ ]` | On | Enables guides for multi-line brackets. |
@@ -112,7 +114,10 @@ independent and off by default.
 - **Multiple carets:** the primary caret defines the current scope. Adding or removing carets refreshes the guide.
 - **HiDPI:** stroke width and corner radius are logical pixels. The editor already scales its `Graphics2D`, so applying
   the display scale again would double the size.
-- **Column 0:** when the opener has no leading whitespace, the guide is a clean vertical line without artificial arms.
+- **Column 0:** scopes whose opener has no leading whitespace are opt-in through **Show the guide for scopes that start
+  at column 0**. When enabled, the guide is a plain vertical line without arms that runs from just below the opener line
+  to just above the closing line, so it never crosses the declaration or its brace. For scopes without a closing
+  bracket, such as a top-level Python `def`, it covers the last body line instead.
 - **External setting changes:** if **Show indent guides** changes in the IDE while the plugin is active, the native-guide
   policy is reapplied and the latest preference is preserved for when the plugin is disabled.
 
@@ -220,10 +225,11 @@ blocks, mixed indentation, strings/comments with bracket-like content, backticks
 Allman-style declarations, settings persistence and migration, scope-type filtering with outward fallback, the settings
 panel, the color settings page, the status-bar widget, folded scopes, folds inside the body, multiple carets, auxiliary
 editor filtering, external indent-guide changes, real soft-wrapped editors, controller/service disposal, background
-editor registration and concurrent registration. A separate pure test suite covers the scope detector, fold visibility,
+editor registration, concurrent registration, and the opt-in column-0 guide with its vertical geometry and a pixel-level
+check that it avoids both boundary lines. A separate pure test suite covers the scope detector, fold visibility,
 editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a performance suite verifies index
 reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks the English and Spanish resources.
-The suite currently has **88 tests** (60 platform/integration, 23 pure, 3 performance and 2 bundle tests).
+The suite currently has **99 tests** (69 platform/integration, 25 pure, 3 performance and 2 bundle tests).
 
 ## CI and quality
 

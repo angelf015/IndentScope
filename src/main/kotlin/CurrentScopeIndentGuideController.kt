@@ -236,6 +236,12 @@ internal class CurrentScopeIndentGuideController(
         }
 
         val state = settings.getState()
+        if (guide.columnZero && !state.showColumnZeroGuide) {
+            // Column-0 guides are opt-in: at the file margin they are visually
+            // intrusive, so the default behavior is to leave those scopes unmarked.
+            clearHighlight()
+            return
+        }
         val existing = rangeHighlighter
         if (guide == appliedGuide && existing?.isValid == true) {
             // The range did not change: keep the highlighter and only refresh the
@@ -266,6 +272,8 @@ internal class CurrentScopeIndentGuideController(
         endLine = guide.endLine,
         strokeWidth = state.strokeWidth.toFloat(),
         cornerRadius = state.cornerRadius.toFloat(),
+        columnZero = guide.columnZero,
+        endsAtClosingLine = guide.endsAtClosingLine,
         customColor = if (state.customColorEnabled) java.awt.Color(state.customColorRgb) else null,
     )
 

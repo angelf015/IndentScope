@@ -53,6 +53,10 @@ class IndentScopeConfigurable : SearchableConfigurable {
                     checkBox(IndentScopeBundle.message("settings.showOnlyInActiveEditor"))
                         .bindSelected(draft::showOnlyInActiveEditor)
                 }
+                row {
+                    checkBox(IndentScopeBundle.message("settings.showColumnZeroGuide"))
+                        .bindSelected(draft::showColumnZeroGuide)
+                }
             }
             group(IndentScopeBundle.message("settings.group.scopeTypes")) {
                 row {
@@ -146,6 +150,7 @@ class IndentScopeConfigurable : SearchableConfigurable {
         draft.enabled = source.enabled
         draft.keepNativeGuides = source.keepNativeGuides
         draft.showOnlyInActiveEditor = source.showOnlyInActiveEditor
+        draft.showColumnZeroGuide = source.showColumnZeroGuide
         draft.showBraceScopes = source.showBraceScopes
         draft.showParenScopes = source.showParenScopes
         draft.showBracketScopes = source.showBracketScopes
