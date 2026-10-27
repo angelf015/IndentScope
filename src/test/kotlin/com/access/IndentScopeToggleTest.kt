@@ -28,6 +28,40 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         )
     }
 
+    fun testColumnZeroGuideHasNoArms() {
+        val path = createScopePath(
+            guideX = 20,
+            firstTextX = 20,
+            firstY = 10,
+            lastTextX = 20,
+            lastY = 50,
+            drawArms = false,
+        )
+        assertEquals(
+            "A guide at column 0 must be a plain vertical line without end hooks",
+            0.0,
+            path.bounds2D.width,
+            0.0,
+        )
+    }
+
+    fun testIndentedGuideKeepsRoundedArms() {
+        val path = createScopePath(
+            guideX = 20,
+            firstTextX = 24,
+            firstY = 10,
+            lastTextX = 24,
+            lastY = 50,
+            drawArms = true,
+        )
+        assertEquals(
+            "An indented guide must still reach the opener and closing text",
+            4.0,
+            path.bounds2D.width,
+            0.001,
+        )
+    }
+
     private val service: IndentScopeService
         get() = ApplicationManager.getApplication().getService(IndentScopeService::class.java)
 

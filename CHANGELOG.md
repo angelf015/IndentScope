@@ -16,6 +16,8 @@
   stopping at the last body line.
 - Classes without methods, such as Lombok DTOs, now show their class-level guide. For a top-level class the guide is
   drawn at the first character of the class declaration because there is no indentation space to its left.
+- The column-0 guide shown for top-level DTOs no longer draws the tiny one-pixel end arms, which looked like stray
+  dots. It is now a clean vertical line.
 
 ## [1.2.1] - 2026-10-26
 

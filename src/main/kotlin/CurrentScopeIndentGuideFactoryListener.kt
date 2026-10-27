@@ -663,7 +663,8 @@ private class ActiveIndentGuideRenderer(
         // is placed half an indent step to the left of the opener text, inside its
         // leading whitespace, so the rounded arms have room to reach the opener and
         // the closing line. At column 0 there is no leading whitespace, so the guide
-        // falls back to the first character of the opener line.
+        // falls back to the first character of the opener line and is drawn as a
+        // plain vertical line: a one-pixel arm there looks like a stray dot.
         val chars = editor.document.charsSequence
         val firstAnchor = lineTextAnchor(editor, chars, anchorLine)
         val lastAnchor = lineTextAnchor(editor, chars, endLine)
@@ -675,6 +676,7 @@ private class ActiveIndentGuideRenderer(
             graphics.fontMetrics.charWidth(' ').coerceAtLeast(1)
         val armLength = minOf(halfIndentStep, leadingWidth / 2f).toInt()
         val guideX = firstAnchor.x - armLength
+        val drawArms = armLength > 0
 
         val copy = graphics.create()
         if (copy !is Graphics2D) {
@@ -693,6 +695,7 @@ private class ActiveIndentGuideRenderer(
                     firstY = firstAnchor.y + halfLine,
                     lastTextX = lastAnchor.x,
                     lastY = lastAnchor.y + halfLine,
+                    drawArms = drawArms,
                 ),
             )
         } finally {
@@ -717,48 +720,53 @@ private class ActiveIndentGuideRenderer(
         return editor.offsetToXY(offset)
     }
 
-    /**
-     * Builds the rounded bracket used by editors such as Neovim/snacks:
-     * a vertical line with rounded corners that turn towards the first and last
-     * lines of the scope.
-     */
-    private fun createScopePath(
-        guideX: Int,
-        firstTextX: Int,
-        firstY: Int,
-        lastTextX: Int,
-        lastY: Int,
-    ): Path2D.Float {
-        val x = guideX.toFloat()
-        val topArmEnd = maxOf(firstTextX, guideX + 1).toFloat()
-        val bottomArmEnd = maxOf(lastTextX, guideX + 1).toFloat()
-        val path = Path2D.Float()
-
-        val radius = minOf(
-            CORNER_RADIUS,
-            (topArmEnd - x).coerceAtLeast(0f),
-            (bottomArmEnd - x).coerceAtLeast(0f),
-            (lastY - firstY).toFloat() / 2f,
-        ).coerceAtLeast(0f)
-
-        val top = firstY.toFloat()
-        val bottom = lastY.toFloat()
-
-        path.moveTo(topArmEnd, top)
-        path.lineTo(x + radius, top)
-        if (radius > 0f) {
-            path.quadTo(x, top, x, top + radius)
-            path.lineTo(x, bottom - radius)
-            path.quadTo(x, bottom, x + radius, bottom)
-        } else {
-            path.lineTo(x, bottom)
-        }
-        path.lineTo(bottomArmEnd, bottom)
-        return path
-    }
-
     private companion object {
-        private const val CORNER_RADIUS = 4f
         private const val STROKE_WIDTH = 1.5f
     }
 }
+
+/**
+ * Builds the path of the current-scope guide. With [drawArms] enabled it is the
+ * rounded bracket used by editors such as Neovim/snacks: a vertical line with
+ * rounded corners that turn towards the first and last lines of the scope. When
+ * the opener starts at column 0 there is no space for those arms, so [drawArms] is
+ * false and the path is a plain vertical line without the tiny end hooks that would
+ * otherwise look like stray dots.
+ */
+internal fun createScopePath(
+    guideX: Int,
+    firstTextX: Int,
+    firstY: Int,
+    lastTextX: Int,
+    lastY: Int,
+    drawArms: Boolean,
+): Path2D.Float {
+    val x = guideX.toFloat()
+    val topArmEnd = if (drawArms) maxOf(firstTextX.toFloat(), x) else x
+    val bottomArmEnd = if (drawArms) maxOf(lastTextX.toFloat(), x) else x
+    val path = Path2D.Float()
+
+    val radius = minOf(
+        CORNER_RADIUS,
+        (topArmEnd - x).coerceAtLeast(0f),
+        (bottomArmEnd - x).coerceAtLeast(0f),
+        (lastY - firstY).toFloat() / 2f,
+    ).coerceAtLeast(0f)
+
+    val top = firstY.toFloat()
+    val bottom = lastY.toFloat()
+
+    path.moveTo(topArmEnd, top)
+    path.lineTo(x + radius, top)
+    if (radius > 0f) {
+        path.quadTo(x, top, x, top + radius)
+        path.lineTo(x, bottom - radius)
+        path.quadTo(x, bottom, x + radius, bottom)
+    } else {
+        path.lineTo(x, bottom)
+    }
+    path.lineTo(bottomArmEnd, bottom)
+    return path
+}
+
+private const val CORNER_RADIUS = 4f
