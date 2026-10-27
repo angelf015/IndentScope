@@ -131,6 +131,81 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
+    fun testMultilineConstructorGuideEndsAtClosingBrace() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            class Example {
+                private final Object first;
+
+                public Example(Object first,
+                               Object second,
+                               Object third) {
+                    this.first = first;
+                    this.second = second;
+                    this.third = third;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(8, 8))
+        activate(editor)
+        try {
+            val guide = customGuide(editor)
+            assertNotNull("Custom guide should be visible in the constructor body", guide)
+            val document = editor.document
+            assertEquals(
+                "Guide should start at the constructor declaration",
+                document.getLineStartOffset(3),
+                guide!!.startOffset,
+            )
+            assertEquals(
+                "Guide should end at the constructor's closing brace",
+                document.getLineEndOffset(9),
+                guide.endOffset,
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testMultilineSignatureWithAlignedClosingParenthesis() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            class Example {
+                public Example(
+                    Object first,
+                    Object second
+                ) {
+                    this.first = first;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(5, 8))
+        activate(editor)
+        try {
+            val guide = customGuide(editor)
+            assertNotNull("Custom guide should be visible in the constructor body", guide)
+            val document = editor.document
+            assertEquals(
+                "Guide should start at the constructor declaration, not at `) {`",
+                document.getLineStartOffset(1),
+                guide!!.startOffset,
+            )
+            assertEquals(
+                "Guide should end at the constructor's closing brace",
+                document.getLineEndOffset(6),
+                guide.endOffset,
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
     fun testGuideExtendsToClosingBracket() {
         myFixture.configureByText(
             "Example.txt",

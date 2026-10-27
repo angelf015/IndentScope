@@ -2,6 +2,13 @@
 
 # IndentScope Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- The guide now reaches the closing `}` of a method or constructor whose declaration spans multiple lines, instead of
+  stopping at the last body line.
+
 ## [1.2.1] - 2026-10-26
 
 ### Changed

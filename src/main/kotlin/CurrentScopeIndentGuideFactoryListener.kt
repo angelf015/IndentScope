@@ -185,14 +185,23 @@ internal class CurrentScopeIndentGuideController(
         // line) or by the nearest non-blank line above it with a smaller indentation.
         // Anchoring the guide to that line is what IntelliJ does for regular indent
         // guides, instead of drawing it next to the block contents.
-        val openerLine = findScopeOpenerLine(chars, baseLine, baseIndent, lineCount, tabSize) ?: return null
+        val detectedOpenerLine =
+            findScopeOpenerLine(chars, baseLine, baseIndent, lineCount, tabSize) ?: return null
+        val openerLine = adjustOpenerLine(chars, detectedOpenerLine)
         val indentColumn = leadingIndentOrBlank(chars, openerLine, tabSize)
         if (indentColumn <= 0) return null
 
+        val scope = resolveScope(chars, openerLine)
+        val knownEndLine = scope?.endLine
+        if (knownEndLine != null) {
+            // Multi-line parentheses/brackets know their closing line exactly.
+            return if (knownEndLine > openerLine) ScopeGuide(openerLine, knownEndLine) else null
+        }
+
         var lastBodyLine = -1
         var closingLine = -1
-        val closer = expectedCloser(chars, openerLine)
-        for (line in openerLine + 1 until lineCount) {
+        val scopeStartLine = scope?.bodyStartLine ?: openerLine
+        for (line in scopeStartLine + 1 until lineCount) {
             val indent = leadingIndentOrBlank(chars, line, tabSize)
             if (indent < 0) continue
 
@@ -201,7 +210,7 @@ internal class CurrentScopeIndentGuideController(
                 // with the line that opens it. Include that line so the guide covers
                 // the whole block instead of only the body. This applies to braces
                 // as well as multi-line parentheses and brackets.
-                if (closer != null && firstSignificantChar(chars, line) == closer) {
+                if (scope?.closer != null && firstSignificantChar(chars, line) == scope.closer) {
                     closingLine = line
                 }
                 break
@@ -250,16 +259,61 @@ internal class CurrentScopeIndentGuideController(
     }
 
     /**
-     * Closing bracket expected for the last unmatched `(`, `[` or `{` on the line, or
-     * null when the line leaves no block open. This is what lets the guide cover
-     * multi-line parentheses and brackets, not just braces.
+     * When the indentation scan selects the `) {` line of a declaration whose
+     * parameters span several lines, walk back to the parenthesis that owns it so
+     * the guide still starts on the `public`/`private` line.
      */
-    private fun expectedCloser(chars: CharSequence, line: Int): Char? {
+    private fun adjustOpenerLine(chars: CharSequence, line: Int): Int {
+        val firstOffset = firstSignificantOffset(chars, line) ?: return line
+        val first = chars[firstOffset]
+        if (first != ')' && first != ']') return line
+
+        val openerOffset = findMatchingOpenerOffset(chars, firstOffset) ?: return line
+        return editor.document.getLineNumber(openerOffset)
+    }
+
+    /**
+     * Resolves what closes the scope opened on [openerLine]. A multi-line
+     * declaration such as `public Foo(\n  args\n) {` opens both a parenthesis and a
+     * brace; the brace is the real scope, so the guide must reach its `}` instead of
+     * stopping at the signature's `)` or at the last body line.
+     */
+    private fun resolveScope(chars: CharSequence, openerLine: Int): ScopeInfo? {
+        val opener = findLastUnmatchedOpener(chars, openerLine) ?: return null
+
+        if (opener.char == '{') {
+            return ScopeInfo(closer = '}', bodyStartLine = openerLine)
+        }
+
+        val closeOffset = findMatchingCloser(chars, opener) ?: return ScopeInfo(
+            closer = matchingCloser(opener.char),
+            bodyStartLine = openerLine,
+        )
+
+        val blockOpenOffset = findBlockOpenerAfter(chars, closeOffset)
+        if (blockOpenOffset != null) {
+            return ScopeInfo(
+                closer = '}',
+                bodyStartLine = editor.document.getLineNumber(blockOpenOffset),
+            )
+        }
+
+        return ScopeInfo(
+            closer = matchingCloser(opener.char),
+            bodyStartLine = openerLine,
+            endLine = editor.document.getLineNumber(closeOffset),
+        )
+    }
+
+    /**
+     * Last `(`, `[` or `{` on [line] that is still open at the end of the line.
+     */
+    private fun findLastUnmatchedOpener(chars: CharSequence, line: Int): BracketOpener? {
         val document = editor.document
         val start = document.getLineStartOffset(line)
         val end = document.getLineEndOffset(line)
 
-        val openers = StringBuilder()
+        val openers = ArrayDeque<BracketOpener>()
         var quote: Char? = null
         var i = start
         while (i < end) {
@@ -276,27 +330,220 @@ internal class CurrentScopeIndentGuideController(
             when (ch) {
                 '"', '\'' -> quote = ch
                 '/' -> if (i + 1 < end && chars[i + 1] == '/') break
-                '(', '[', '{' -> openers.append(ch)
+                '(', '[', '{' -> openers.addLast(BracketOpener(ch, i))
                 ')', ']', '}' -> {
-                    val opener = when (ch) {
-                        ')' -> '('
-                        ']' -> '['
-                        else -> '{'
-                    }
-                    if (openers.isNotEmpty() && openers[openers.length - 1] == opener) {
-                        openers.setLength(openers.length - 1)
+                    if (openers.isNotEmpty() && openers.last().char == matchingOpener(ch)) {
+                        openers.removeLast()
                     }
                 }
             }
             i++
         }
 
-        return when {
-            openers.isEmpty() -> null
-            openers[openers.length - 1] == '(' -> ')'
-            openers[openers.length - 1] == '[' -> ']'
-            else -> '}'
+        return openers.lastOrNull()
+    }
+
+    /**
+     * Offset of the bracket that closes [opener], or null when it is not closed.
+     */
+    private fun findMatchingCloser(chars: CharSequence, opener: BracketOpener): Int? {
+        val stack = ArrayDeque<Char>()
+        stack.addLast(opener.char)
+
+        var quote: Char? = null
+        var lineComment = false
+        var blockComment = false
+        var i = opener.offset + 1
+        while (i < chars.length) {
+            val ch = chars[i]
+            if (lineComment) {
+                if (ch == '\n') lineComment = false
+                i++
+                continue
+            }
+            if (blockComment) {
+                if (ch == '*' && i + 1 < chars.length && chars[i + 1] == '/') {
+                    blockComment = false
+                    i += 2
+                } else {
+                    i++
+                }
+                continue
+            }
+            if (quote != null) {
+                when {
+                    ch == '\\' -> i += 2
+                    ch == quote -> {
+                        quote = null
+                        i++
+                    }
+                    else -> i++
+                }
+                continue
+            }
+
+            when (ch) {
+                '"', '\'' -> quote = ch
+                '/' -> {
+                    if (i + 1 < chars.length && chars[i + 1] == '/') {
+                        lineComment = true
+                        i += 2
+                        continue
+                    }
+                    if (i + 1 < chars.length && chars[i + 1] == '*') {
+                        blockComment = true
+                        i += 2
+                        continue
+                    }
+                }
+                '(', '[', '{' -> stack.addLast(ch)
+                ')', ']', '}' -> {
+                    if (stack.lastOrNull() == matchingOpener(ch)) {
+                        stack.removeLast()
+                        if (stack.isEmpty()) return i
+                    }
+                }
+            }
+            i++
         }
+        return null
+    }
+
+    /**
+     * Offset of the opener matching the closing bracket at [closeOffset]. Used to
+     * recover the declaration line of a `) {` header continuation.
+     */
+    private fun findMatchingOpenerOffset(chars: CharSequence, closeOffset: Int): Int? {
+        val stack = ArrayDeque<Int>()
+
+        var quote: Char? = null
+        var lineComment = false
+        var blockComment = false
+        var i = 0
+        while (i <= closeOffset) {
+            val ch = chars[i]
+            if (lineComment) {
+                if (ch == '\n') lineComment = false
+                i++
+                continue
+            }
+            if (blockComment) {
+                if (ch == '*' && i + 1 < chars.length && chars[i + 1] == '/') {
+                    blockComment = false
+                    i += 2
+                } else {
+                    i++
+                }
+                continue
+            }
+            if (quote != null) {
+                when {
+                    ch == '\\' -> i += 2
+                    ch == quote -> {
+                        quote = null
+                        i++
+                    }
+                    else -> i++
+                }
+                continue
+            }
+
+            when (ch) {
+                '"', '\'' -> quote = ch
+                '/' -> {
+                    if (i + 1 < chars.length && chars[i + 1] == '/') {
+                        lineComment = true
+                        i += 2
+                        continue
+                    }
+                    if (i + 1 < chars.length && chars[i + 1] == '*') {
+                        blockComment = true
+                        i += 2
+                        continue
+                    }
+                }
+                '(', '[', '{' -> stack.addLast(i)
+                ')', ']', '}' -> {
+                    if (stack.isNotEmpty() && chars[stack.last()] == matchingOpener(ch)) {
+                        val opener = stack.removeLast()
+                        if (i == closeOffset) return opener
+                    }
+                }
+            }
+            i++
+        }
+        return null
+    }
+
+    /**
+     * Finds the `{` that starts the body after a declaration's closing `)`. It may be
+     * on the same line (`) {`) or on the next non-blank line for Allman-style code.
+     */
+    private fun findBlockOpenerAfter(chars: CharSequence, closeOffset: Int): Int? {
+        val document = editor.document
+        val closeLine = document.getLineNumber(closeOffset)
+        val closeLineEnd = document.getLineEndOffset(closeLine)
+
+        findBraceOnLine(chars, closeOffset + 1, closeLineEnd)?.let { return it }
+
+        for (line in closeLine + 1 until document.lineCount) {
+            val start = document.getLineStartOffset(line)
+            val end = document.getLineEndOffset(line)
+            var offset = start
+            while (offset < end && chars[offset].isWhitespace()) offset++
+            if (offset >= end) continue
+            return if (chars[offset] == '{') offset else null
+        }
+        return null
+    }
+
+    private fun findBraceOnLine(chars: CharSequence, start: Int, end: Int): Int? {
+        var quote: Char? = null
+        var i = start
+        while (i < end) {
+            val ch = chars[i]
+            if (quote != null) {
+                when {
+                    ch == '\\' -> i++
+                    ch == quote -> quote = null
+                }
+                i++
+                continue
+            }
+
+            when (ch) {
+                '"', '\'' -> quote = ch
+                '/' -> if (i + 1 < end && chars[i + 1] == '/') return null
+                '{' -> return i
+            }
+            i++
+        }
+        return null
+    }
+
+    private fun matchingOpener(closer: Char): Char? = when (closer) {
+        ')' -> '('
+        ']' -> '['
+        '}' -> '{'
+        else -> null
+    }
+
+    private fun matchingCloser(opener: Char): Char? = when (opener) {
+        '(' -> ')'
+        '[' -> ']'
+        '{' -> '}'
+        else -> null
+    }
+
+    private fun firstSignificantOffset(chars: CharSequence, line: Int): Int? {
+        val document = editor.document
+        val start = document.getLineStartOffset(line)
+        val end = document.getLineEndOffset(line)
+
+        for (i in start until end) {
+            if (!chars[i].isWhitespace()) return i
+        }
+        return null
     }
 
     private fun findScopeOpenerLine(
@@ -374,6 +621,17 @@ internal class CurrentScopeIndentGuideController(
         rangeHighlighter = null
         appliedGuide = null
     }
+
+    private data class BracketOpener(
+        val char: Char,
+        val offset: Int,
+    )
+
+    private data class ScopeInfo(
+        val closer: Char?,
+        val bodyStartLine: Int,
+        val endLine: Int? = null,
+    )
 
     private data class ScopeGuide(
         val anchorLine: Int,
