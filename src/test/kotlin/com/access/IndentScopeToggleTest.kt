@@ -15,6 +15,8 @@ import com.intellij.testFramework.EditorTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.awt.image.BufferedImage
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import javax.xml.parsers.DocumentBuilderFactory
 
 class IndentScopeToggleTest : BasePlatformTestCase() {
@@ -1204,6 +1206,113 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         )
     }
 
+    fun testControllerDisposeRestoresNativeGuides() {
+        val editor = configureBlockEditor()
+        // Detach the application-level controller so this test owns the editor lifecycle.
+        service.editorReleased(editor)
+        editor.settings.isIndentGuidesShown = true
+
+        val controller = CurrentScopeIndentGuideController(editor)
+        try {
+            controller.onSettingsChanged()
+            assertTrue("The controller should paint the custom guide", hasCustomGuide(editor))
+            assertFalse(
+                "The controller should hide native guides while active",
+                editor.settings.isIndentGuidesShown,
+            )
+
+            controller.dispose()
+
+            assertFalse("Disposing the controller must remove its guide", hasCustomGuide(editor))
+            assertTrue(
+                "Disposing the controller must restore native guides",
+                editor.settings.isIndentGuidesShown,
+            )
+        } finally {
+            controller.dispose()
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testServiceDisposeRemovesAllControllers() {
+        val editor = configureBlockEditor()
+        service.editorReleased(editor)
+
+        val localService = IndentScopeService()
+        try {
+            localService.editorCreated(editor)
+            assertTrue("The service should register the editor", localService.hasController(editor))
+            assertEquals(1, localService.registeredControllerCount())
+
+            localService.dispose()
+
+            assertEquals(
+                "Disposing the service must clear its controller map",
+                0,
+                localService.registeredControllerCount(),
+            )
+            assertFalse("A disposed service must not keep the editor", localService.hasController(editor))
+        } finally {
+            localService.dispose()
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testBackgroundEditorRegistrationIsDispatchedToEdt() {
+        val editor = configureBlockEditor()
+        service.editorReleased(editor)
+        val registered = CountDownLatch(1)
+        try {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                service.editorCreated(editor)
+                registered.countDown()
+            }
+            assertTrue(
+                "Background registration should finish",
+                registered.await(5, TimeUnit.SECONDS),
+            )
+
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+            assertTrue(
+                "Background registration must be applied on the EDT",
+                service.hasController(editor),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testConcurrentEditorRegistrationCreatesSingleController() {
+        val editor = configureBlockEditor()
+        service.editorReleased(editor)
+        val threads = 4
+        val done = CountDownLatch(threads)
+        try {
+            repeat(threads) {
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    service.editorCreated(editor)
+                    done.countDown()
+                }
+            }
+            assertTrue(
+                "Concurrent registrations should finish",
+                done.await(5, TimeUnit.SECONDS),
+            )
+
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+            assertTrue("The editor must be registered", service.hasController(editor))
+            assertEquals(
+                "Concurrent registration must not create duplicate guides",
+                1,
+                editor.markupModel.allHighlighters.count { it.customRenderer is ActiveIndentGuideRenderer },
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
     fun testSoftWrappedScopeStillPaints() {
         myFixture.configureByText(
             "Example.txt",
@@ -1288,10 +1397,9 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         settings.apply(settings.getState().copy().apply(block))
     }
 
-    private fun customGuide(editor: EditorEx): RangeHighlighter? =
-        editor.markupModel.allHighlighters.firstOrNull {
-            it.customRenderer?.javaClass?.name == "com.access.ActiveIndentGuideRenderer"
-        }
+    private fun customGuide(editor: EditorEx): RangeHighlighter? = editor.markupModel.allHighlighters.firstOrNull {
+        it.customRenderer?.javaClass?.name == "com.access.ActiveIndentGuideRenderer"
+    }
 
     private fun assertGuideSpansLines(editor: EditorEx, startLine: Int, endLine: Int) {
         val guide = customGuide(editor)

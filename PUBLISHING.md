@@ -14,20 +14,33 @@ repositorio.
 
 ## 1. Comprobar el build
 
-Requiere JDK 21.
+Requiere JDK 21 (el build declara el toolchain explícitamente).
 
 ```bash
-./gradlew clean build buildPlugin verifyPluginStructure
+./gradlew clean build buildPlugin verifyPluginStructure ktlintCheck
+./gradlew koverHtmlReport
 ./gradlew verifyPlugin
 ```
 
-El build ejecuta **84 tests** (56 de plataforma/integración, 23 puros, 3 de rendimiento y 2 de bundles). Resultado esperado de `verifyPlugin`:
+El build ejecuta **88 tests** (60 de plataforma/integración, 23 puros, 3 de rendimiento y 2 de bundles) y ktlint.
+Resultado esperado de `verifyPlugin`:
 
 ```
 IC-252.28539.97 (IntelliJ IDEA 2025.2.6.3): Compatible
+IU-253.33813.55 (IntelliJ IDEA 2025.3.6.1): Compatible
+IU-261.27258.48 (IntelliJ IDEA 2026.1.5): Compatible
 IU-262.10968.63 (IntelliJ IDEA 2026.2.3): Compatible
 Dynamic Plugin Eligibility: Plugin can probably be enabled or disabled without IDE restart
 ```
+
+Para incluir Android Studio (descarga un instalador de ~1,5 GB):
+
+```bash
+./gradlew verifyPlugin -PverifyAndroidStudio
+```
+
+El informe de cobertura queda en `build/reports/kover/html/index.html`. La cobertura de líneas actual ronda el 88 % y
+`koverVerify` falla el build si baja del 80 %.
 
 > Pueden aparecer 3 avisos de API obsoleta: la creación de `TextAttributesKey` con atributos por defecto y el puente
 > generado por Kotlin para `StatusBarWidget.getPresentation()`. Son avisos, no incompatibilidades.
@@ -124,8 +137,10 @@ Después, en GitHub:
 5. Adjunta el ZIP de `build/distributions/`.
 6. Publica la release.
 
-El workflow `.github/workflows/build.yml` compila y ejecuta los tests en cada push y pull request. La verificación de
-compatibilidad se ejecuta en tags `v*` o manualmente con **Run workflow**.
+El workflow `.github/workflows/build.yml` compila, ejecuta los tests, ktlint y la cobertura en Ubuntu, macOS y Windows,
+valida el wrapper de Gradle en cada push y pull request, y publica el ZIP y el informe de cobertura como artefactos. La
+verificación de compatibilidad se ejecuta en tags `v*`, en cada push a `main`, semanalmente y bajo demanda; el job
+programado incluye Android Studio.
 
 ## 5. Publicar en JetBrains Marketplace
 
@@ -177,7 +192,8 @@ English and Spanish.
 Toggle it with Ctrl+Alt+G (Cmd+Option+G on macOS), from View → Appearance → IndentScope Guide, through the status-bar
 widget, or with the stable IndentScope.ToggleGuide action ID in IdeaVim.
 
-Requires IntelliJ Platform 2025.2 (build 252) or newer. Verified with IntelliJ IDEA 2025.2.6.3 and 2026.2.3.
+Requires IntelliJ Platform 2025.2 (build 252) or newer. Verified with IntelliJ IDEA 2025.2.6.3, 2025.3.6.1, 2026.1.5,
+2026.2.3 and Android Studio 2026.2.1.8.
 ```
 
 La revisión de una versión nueva suele tardar menos que la publicación inicial, pero puede tardar uno o varios días.
@@ -193,10 +209,12 @@ Para cada versión nueva:
 
 1. Sube `version` en `gradle.properties`.
 2. Añade una sección nueva a `CHANGELOG.md`.
-3. Ejecuta `./gradlew clean build buildPlugin verifyPlugin`.
-4. Firma con `./gradlew signPlugin` si usas certificado.
-5. Crea commit, tag y release en GitHub.
-6. Sube el ZIP desde la página del plugin en Marketplace (**Upload new version**).
+3. Ejecuta `./gradlew clean build buildPlugin verifyPluginStructure ktlintCheck` y `./gradlew verifyPlugin`.
+4. Revisa la cobertura con `./gradlew koverHtmlReport` y, si es una release, verifica también Android Studio con
+   `./gradlew verifyPlugin -PverifyAndroidStudio`.
+5. Firma con `./gradlew signPlugin` si usas certificado.
+6. Crea commit, tag y release en GitHub.
+7. Sube el ZIP desde la página del plugin en Marketplace (**Upload new version**).
 
 La primera subida ya está hecha y las siguientes también pueden automatizarse con `publishPlugin` y un token de
 Marketplace, pero este repositorio está preparado para que las subidas las hagas tú manualmente.

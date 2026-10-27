@@ -4,9 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Lifecycle regression tests for controller/service disposal and concurrent editor registration.
+- CI matrix on Ubuntu, macOS and Windows, Gradle wrapper validation, ktlint and Kover coverage reports.
+- Compatibility verification against IntelliJ IDEA 2025.3.6.1, 2026.1.5 and Android Studio 2026.2.1.8.
+
 ### Changed
 
 - Vendor and organization name updated to **NeoPlus** for future releases.
+- The build declares JDK 21 explicitly with `jvmToolchain(21)` and enforces ktlint formatting.
+- Status-bar source file renamed to `IndentScopeStatusBarWidgetFactory.kt` to match its public class.
 
 ### Performance
 

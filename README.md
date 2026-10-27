@@ -158,18 +158,18 @@ Useful commands while configuring:
 ## Requirements
 
 - IntelliJ Platform 2025.2+ (build 252+), including 2025.3 and 2026.x.
-- Verified with IntelliJ IDEA 2025.2.6.3 and 2026.2.3.
+- Verified with IntelliJ IDEA 2025.2.6.3, 2025.3.6.1, 2026.1.5 and 2026.2.3.
 - The plugin does not depend on a specific language plugin.
 
 ## Build
 
-Requirements: JDK 21. The Gradle wrapper downloads the rest.
+Requirements: JDK 21. The Gradle wrapper downloads the rest, and the build declares a JDK 21 toolchain explicitly.
 
 ```bash
 ./gradlew build buildPlugin verifyPluginStructure
 ```
 
-The installable ZIP is generated at:
+The `build` task also runs ktlint through the `check` lifecycle. The installable ZIP is generated at:
 
 ```
 build/distributions/IndentScope-1.3.0.zip
@@ -192,6 +192,22 @@ To check binary compatibility against the supported IDEs:
 ./gradlew verifyPlugin
 ```
 
+Android Studio uses a large installer, so it is opt-in for local verification:
+
+```bash
+./gradlew verifyPlugin -PverifyAndroidStudio
+```
+
+To generate the coverage report:
+
+```bash
+./gradlew koverHtmlReport
+./gradlew koverVerify
+```
+
+The HTML report is written to `build/reports/kover/html/index.html`. `koverVerify` fails the build if line coverage drops
+below 80 %.
+
 ## Tests
 
 ```bash
@@ -203,11 +219,27 @@ unbraced scopes that must not borrow an outer block's closing brace, top-level P
 blocks, mixed indentation, strings/comments with bracket-like content, backticks, triple quotes, nested comments,
 Allman-style declarations, settings persistence and migration, scope-type filtering with outward fallback, the settings
 panel, the color settings page, the status-bar widget, folded scopes, folds inside the body, multiple carets, auxiliary
-editor filtering, external indent-guide changes and real soft-wrapped editors. A separate pure test suite covers the
-scope detector, fold visibility, editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a
-performance suite verifies index reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks
-the English and Spanish resources. The suite currently has **84 tests** (56 platform/integration, 23 pure, 3
-performance and 2 bundle tests).
+editor filtering, external indent-guide changes, real soft-wrapped editors, controller/service disposal, background
+editor registration and concurrent registration. A separate pure test suite covers the scope detector, fold visibility,
+editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a performance suite verifies index
+reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks the English and Spanish resources.
+The suite currently has **88 tests** (60 platform/integration, 23 pure, 3 performance and 2 bundle tests).
+
+## CI and quality
+
+Every push and pull request builds, tests, lints and packages the plugin on Ubuntu, macOS and Windows. The workflow also
+validates the Gradle wrapper and publishes the plugin ZIP and the coverage report as artifacts. Compatibility verification
+runs on every push to `main`, on release tags, on a weekly schedule and on demand; the scheduled job also verifies
+Android Studio.
+
+```bash
+./gradlew ktlintCheck
+./gradlew koverHtmlReport
+./gradlew verifyPlugin -PverifyAndroidStudio
+```
+
+Formatting rules shared by IntelliJ IDEA and ktlint live in `.editorconfig`, and the CI configuration is defined in
+`.github/workflows/build.yml`.
 
 ## Project structure
 
@@ -226,7 +258,7 @@ src/main/kotlin/
 ├── IndentScopeConfigurable.kt                 Settings → Tools → IndentScope panel
 ├── IndentScopeColors.kt                       Color key and theme-aware color resolution
 ├── IndentScopeColorSettingsPage.kt            Settings → Editor → Color Scheme page
-├── IndentScopeStatusBarWidget.kt              Status-bar widget and quick toggle
+├── IndentScopeStatusBarWidgetFactory.kt       Status-bar widget factory and quick toggle
 ├── IndentScopeBundle.kt                       Localized message access
 └── ToggleIndentScopeGuideAction.kt            Global Show/Hide action
 

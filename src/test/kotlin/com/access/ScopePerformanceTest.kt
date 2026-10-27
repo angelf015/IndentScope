@@ -121,7 +121,6 @@ class ScopePerformanceTest {
             return text[index]
         }
 
-        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
-            text.subSequence(startIndex, endIndex)
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence = text.subSequence(startIndex, endIndex)
     }
 }

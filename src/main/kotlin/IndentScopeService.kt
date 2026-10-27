@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
+import com.intellij.openapi.util.Disposer
 import java.beans.PropertyChangeListener
 import java.util.concurrent.ConcurrentHashMap
 
@@ -23,14 +24,23 @@ import java.util.concurrent.ConcurrentHashMap
 class IndentScopeService : Disposable {
 
     private val controllers = ConcurrentHashMap<EditorEx, CurrentScopeIndentGuideController>()
+    private val messageBusConnection = ApplicationManager.getApplication().messageBus.connect(this)
+    private val listenerDisposable = Disposer.newDisposable("IndentScopeService")
+    private val externalIndentGuidesListener = PropertyChangeListener { event ->
+        if (event.propertyName ==
+            EditorSettingsExternalizable.PropNames.PROP_IS_INDENT_GUIDES_SHOWN
+        ) {
+            onExternalIndentGuidesChanged()
+        }
+    }
+
     @Volatile
     private var disposed = false
     private val settings: IndentScopeSettings
         get() = IndentScopeSettings.getInstance()
 
     init {
-        val connection = ApplicationManager.getApplication().messageBus.connect(this)
-        connection.subscribe(
+        messageBusConnection.subscribe(
             IndentScopeSettingsListener.TOPIC,
             object : IndentScopeSettingsListener {
                 override fun settingsChanged() {
@@ -43,14 +53,8 @@ class IndentScopeService : Disposable {
         // active. React after the platform has refreshed every editor's local
         // setting, so the plugin's native-guide policy is never left in a stale state.
         EditorSettingsExternalizable.getInstance().addPropertyChangeListener(
-            PropertyChangeListener { event ->
-                if (event.propertyName ==
-                    EditorSettingsExternalizable.PropNames.PROP_IS_INDENT_GUIDES_SHOWN
-                ) {
-                    onExternalIndentGuidesChanged()
-                }
-            },
-            this,
+            externalIndentGuidesListener,
+            listenerDisposable,
         )
     }
 
@@ -180,6 +184,9 @@ class IndentScopeService : Disposable {
     /** Number of editors currently tracked. Used by diagnostics and lifecycle tests. */
     internal fun registeredControllerCount(): Int = controllers.size
 
+    /** Whether the given editor currently has a controller. Used by lifecycle tests. */
+    internal fun hasController(editor: EditorEx): Boolean = controllers.containsKey(editor)
+
     override fun dispose() {
         if (disposed) return
         disposed = true
@@ -187,12 +194,16 @@ class IndentScopeService : Disposable {
         val openControllers = controllers.values.toList()
         controllers.clear()
         openControllers.forEach { it.dispose() }
+
+        // Release the listeners eagerly: tests create short-lived service instances,
+        // and the platform-disposed service must not keep receiving events.
+        messageBusConnection.disconnect()
+        Disposer.dispose(listenerDisposable)
     }
 
     companion object {
         private val LOG = Logger.getInstance(IndentScopeService::class.java)
 
-        fun getInstance(): IndentScopeService =
-            ApplicationManager.getApplication().getService(IndentScopeService::class.java)
+        fun getInstance(): IndentScopeService = ApplicationManager.getApplication().getService(IndentScopeService::class.java)
     }
 }
