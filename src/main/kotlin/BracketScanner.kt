@@ -163,7 +163,8 @@ internal class BracketScanner(
         val closeLineEnd = lines.lineEndOffset(closeLine)
         findPlatformBraceOnLine(closeOffset + 1, closeLineEnd, '{', type)?.let { return it }
 
-        for (line in closeLine + 1 until lines.lineCount) {
+        val lastLine = minOf(lines.lineCount - 1, closeLine + MAX_LOOKAHEAD_LINES)
+        for (line in closeLine + 1..lastLine) {
             val start = lines.lineStartOffset(line)
             val end = lines.lineEndOffset(line)
             var i = start
@@ -200,232 +201,54 @@ internal class BracketScanner(
  * Language-agnostic fallback used for plain text and for editors without a platform
  * brace matcher. It understands the common string and comment forms so a bracket in
  * a string, a template literal or a block comment is never treated as code.
+ *
+ * The heavy lexical work lives in [TextBracketIndex], which is built once per
+ * document snapshot and then reused by every query.
  */
 internal class TextBracketScanner(
     private val lines: LineMap,
     private val chars: CharSequence,
-    private val syntax: TextSyntax,
+    syntax: TextSyntax,
 ) : BracketResolver {
-    override fun lastUnmatchedOpenerOnLine(line: Int): BracketOpener? {
-        val start = lines.lineStartOffset(line)
-        val end = lines.lineEndOffset(line)
-        val stack = ArrayDeque<BracketOpener>()
+    private val index: TextBracketIndex by lazy { TextBracketIndex(chars, syntax) }
 
-        // Start at the beginning of the document so a line that begins inside a
-        // multi-line string or block comment is not mistaken for code.
-        scanCode(0, end) { offset, ch ->
-            when (ch) {
-                '(', '[', '{' -> stack.addLast(BracketOpener(ch, offset))
-                ')', ']', '}' -> {
-                    if (stack.isNotEmpty() && matchingOpener(ch) == stack.last().char) {
-                        stack.removeLast()
-                    }
-                }
-            }
-            true
-        }
-        return stack.lastOrNull { it.offset >= start }
-    }
+    override fun lastUnmatchedOpenerOnLine(line: Int): BracketOpener? =
+        index.lastUnmatchedOpenerOnLine(
+            start = lines.lineStartOffset(line),
+            end = lines.lineEndOffset(line),
+        )
 
-    override fun matchingCloser(opener: BracketOpener): Int? {
-        val stack = ArrayDeque<Char>()
-        stack.addLast(opener.char)
-        var result: Int? = null
+    override fun matchingCloser(opener: BracketOpener): Int? = index.matchingCloser(opener.offset)
 
-        scanCode(opener.offset + 1, chars.length) { offset, ch ->
-            when (ch) {
-                '(', '[', '{' -> stack.addLast(ch)
-                ')', ']', '}' -> {
-                    if (stack.lastOrNull() == matchingOpener(ch)) {
-                        stack.removeLast()
-                        if (stack.isEmpty()) {
-                            result = offset
-                            return@scanCode false
-                        }
-                    }
-                }
-            }
-            true
-        }
-        return result
-    }
-
-    override fun matchingOpener(closeOffset: Int): Int? {
-        val stack = ArrayDeque<Int>()
-        var result: Int? = null
-
-        scanCode(0, closeOffset + 1) { offset, ch ->
-            when (ch) {
-                '(', '[', '{' -> stack.addLast(offset)
-                ')', ']', '}' -> {
-                    if (stack.isNotEmpty() && chars[stack.last()] == matchingOpener(ch)) {
-                        val opener = stack.removeLast()
-                        if (offset == closeOffset) {
-                            result = opener
-                            return@scanCode false
-                        }
-                    }
-                }
-            }
-            true
-        }
-        return result
-    }
+    override fun matchingOpener(closeOffset: Int): Int? = index.matchingOpener(closeOffset)
 
     override fun findBlockOpenerAfter(closeOffset: Int): Int? {
         val closeLine = lines.lineNumber(closeOffset)
         val closeLineEnd = lines.lineEndOffset(closeLine)
-        findBraceOnLine(closeOffset + 1, closeLineEnd)?.let { return it }
+        index.findBraceOnLine(closeOffset + 1, closeLineEnd)?.let { return it }
 
-        for (line in closeLine + 1 until lines.lineCount) {
-            val firstCode = firstCodeOffset(line) ?: continue
+        val lastLine = minOf(lines.lineCount - 1, closeLine + MAX_LOOKAHEAD_LINES)
+        for (line in closeLine + 1..lastLine) {
+            val firstCode = index.firstCodeOffset(
+                start = lines.lineStartOffset(line),
+                end = lines.lineEndOffset(line),
+            ) ?: continue
             return if (chars[firstCode] == '{') firstCode else null
         }
         return null
     }
 
-    override fun firstCodeChar(line: Int): Char? = firstCodeOffset(line)?.let { chars[it] }
-
-    private fun firstCodeOffset(line: Int): Int? {
-        val start = lines.lineStartOffset(line)
-        val end = lines.lineEndOffset(line)
-        var result: Int? = null
-
-        // Scan from the document start so a line inside a multi-line string or
-        // comment does not expose bracket-like content as code.
-        scanCode(0, end) { offset, _ ->
-            if (offset < start) {
-                true
-            } else {
-                result = offset
-                false
-            }
-        }
-        return result
-    }
-
-    private fun findBraceOnLine(start: Int, end: Int): Int? {
-        var result: Int? = null
-        scanCode(start, end) { offset, ch ->
-            if (ch == '{') {
-                result = offset
-                false
-            } else {
-                true
-            }
-        }
-        return result
-    }
-
-    private inline fun scanCode(start: Int, end: Int, visit: (Int, Char) -> Boolean) {
-        var i = start
-        var lineComment: String? = null
-        var blockDepth = 0
-        var string: StringState? = null
-
-        while (i < end) {
-            val ch = chars[i]
-
-            if (lineComment != null) {
-                if (ch == '\n') lineComment = null
-                i++
-                continue
-            }
-
-            if (blockDepth > 0) {
-                if (syntax.nestedBlockComments && ch == '/' && i + 1 < end && chars[i + 1] == '*') {
-                    blockDepth++
-                    i += 2
-                    continue
-                }
-                if (ch == '*' && i + 1 < end && chars[i + 1] == '/') {
-                    blockDepth--
-                    i += 2
-                    continue
-                }
-                i++
-                continue
-            }
-
-            val currentString = string
-            if (currentString != null) {
-                if (currentString.escape && ch == '\\') {
-                    i += 2
-                    continue
-                }
-                if (currentString.doubledDelimiter &&
-                    ch == currentString.delimiter[0] &&
-                    i + 1 < end &&
-                    chars[i + 1] == currentString.delimiter[0]
-                ) {
-                    i += 2
-                    continue
-                }
-                if (matchesAt(i, end, currentString.delimiter)) {
-                    string = null
-                    i += currentString.delimiter.length
-                    continue
-                }
-                i++
-                continue
-            }
-
-            val lineToken = syntax.lineComments.firstOrNull { matchesAt(i, end, it) }
-            if (lineToken != null) {
-                lineComment = lineToken
-                i += lineToken.length
-                continue
-            }
-            if (syntax.blockComments && ch == '/' && i + 1 < end && chars[i + 1] == '*') {
-                blockDepth = 1
-                i += 2
-                continue
-            }
-            if (syntax.verbatimStrings && ch == '@' && i + 1 < end && chars[i + 1] == '"') {
-                string = StringState("\"", escape = false, doubledDelimiter = true)
-                i += 2
-                continue
-            }
-            if (syntax.backtickStrings && ch == '`') {
-                string = StringState("`", escape = syntax.backtickEscapes, doubledDelimiter = false)
-                i++
-                continue
-            }
-            if (syntax.tripleQuotedStrings && matchesAt(i, end, "\"\"\"")) {
-                string = StringState("\"\"\"", escape = syntax.tripleQuoteEscapes, doubledDelimiter = false)
-                i += 3
-                continue
-            }
-            if (syntax.tripleQuotedStrings && matchesAt(i, end, "'''")) {
-                string = StringState("'''", escape = syntax.tripleQuoteEscapes, doubledDelimiter = false)
-                i += 3
-                continue
-            }
-            if (ch == '"' || ch == '\'') {
-                string = StringState(ch.toString(), escape = true, doubledDelimiter = syntax.doubledQuoteEscapes)
-                i++
-                continue
-            }
-
-            if (!visit(i, ch)) return
-            i++
-        }
-    }
-
-    private fun matchesAt(offset: Int, end: Int, token: String): Boolean {
-        if (offset + token.length > end) return false
-        for (index in token.indices) {
-            if (chars[offset + index] != token[index]) return false
-        }
-        return true
-    }
-
-    private data class StringState(
-        val delimiter: String,
-        val escape: Boolean,
-        val doubledDelimiter: Boolean,
-    )
+    override fun firstCodeChar(line: Int): Char? = index.firstCodeOffset(
+        start = lines.lineStartOffset(line),
+        end = lines.lineEndOffset(line),
+    )?.let { chars[it] }
 }
+
+/**
+ * Safety valve for declarations followed by an unusually long run of blank lines.
+ * The matcher only needs the first non-blank line after the closing parenthesis.
+ */
+private const val MAX_LOOKAHEAD_LINES = 5_000
 
 internal data class TextSyntax(
     val lineComments: List<String> = listOf("//"),

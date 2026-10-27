@@ -36,6 +36,7 @@ fun main() {
   the plugin is active.
 - Optional unbraced scopes end at their last body line; they never borrow the closing bracket of an outer block.
 - Handles collapsed folds, soft-wrapped lines, multiple carets and HiDPI consistently.
+- Reuses the scope analysis and highlighter while the document and scope are unchanged, keeping large files responsive.
 - Console, diff and preview editors are supported as opt-in surfaces.
 - Settings panel in **Settings → Tools → IndentScope** for behavior and appearance.
 - Theme-aware guide color, also customizable per color scheme.
@@ -204,15 +205,20 @@ Allman-style declarations, settings persistence and migration, scope-type filter
 panel, the color settings page, the status-bar widget, folded scopes, folds inside the body, multiple carets, auxiliary
 editor filtering, external indent-guide changes and real soft-wrapped editors. A separate pure test suite covers the
 scope detector, fold visibility, editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a
-bundle test checks the English and Spanish resources. The suite currently has **79 tests** (54 platform, 23 pure and
-2 bundle tests).
+performance suite verifies index reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks
+the English and Spanish resources. The suite currently has **84 tests** (56 platform/integration, 23 pure, 3
+performance and 2 bundle tests).
 
 ## Project structure
 
 ```
 src/main/kotlin/
-├── CurrentScopeIndentGuideFactoryListener.kt  Editor listener, controller and renderer
+├── CurrentScopeIndentGuideFactoryListener.kt  Editor factory listener
+├── CurrentScopeIndentGuideController.kt       Per-editor state, lifecycle and guide updates
+├── ActiveIndentGuideRenderer.kt               Highlighter renderer and rounded path geometry
+├── ScopeAnalysis.kt                           Cached detector and bracket index per document snapshot
 ├── BracketScanner.kt                          Language-aware bracket scanner and plain-text fallback
+├── TextBracketIndex.kt                        One-pass lexical and bracket index for the fallback
 ├── ScopeDetector.kt                           Pure scope resolution, line map and guide model
 ├── GuideRobustness.kt                         Fold, editor-kind and soft-wrap visibility helpers
 ├── IndentScopeService.kt                      Application service: per-editor controllers and refresh
@@ -235,6 +241,7 @@ src/main/resources/
 src/test/kotlin/com/access/
 ├── IndentScopeToggleTest.kt                   Platform and integration regression tests
 ├── ScopeDetectorTest.kt                       Pure detector and visibility tests
+├── ScopePerformanceTest.kt                    Index-reuse and large-file tests
 └── IndentScopeBundleTest.kt                   English/Spanish resource tests
 ```
 

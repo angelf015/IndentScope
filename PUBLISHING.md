@@ -1,13 +1,16 @@
 # Publicar IndentScope
 
-Guía para publicar la versión **1.3.0** en GitHub y en JetBrains Marketplace. Todos los comandos se ejecutan desde la raíz
-del repositorio.
+Guía para publicar IndentScope en GitHub y en JetBrains Marketplace. Todos los comandos se ejecutan desde la raíz del
+repositorio.
 
-> El plugin ya está publicado en JetBrains Marketplace como **IndentScope** (ID `35438`, XML ID
-> `com.access.IndentScope`) con licencia Apache 2.0. La versión 1.3.0 se sube como **actualización**, no como plugin
-> nuevo.
+> La versión **1.3.0** ya fue publicada y aprobada en JetBrains Marketplace. Esta guía queda como referencia para la
+> próxima versión: actualiza los números de versión de los ejemplos antes de usarla y no reutilices `1.3.0`.
 
-> Los cambios de esta versión están sin commitear a propósito. Revisa `git diff` antes de confirmar nada.
+> El plugin está publicado en JetBrains Marketplace como **IndentScope** (ID `35438`, XML ID
+> `com.access.IndentScope`) con licencia Apache 2.0. Las siguientes versiones se suben como **actualización**, no como
+> plugin nuevo. El vendor y la organización se muestran como **NeoPlus**.
+
+> Los cambios de la próxima versión están sin commitear a propósito. Revisa `git diff` antes de confirmar nada.
 
 ## 1. Comprobar el build
 
@@ -18,7 +21,7 @@ Requiere JDK 21.
 ./gradlew verifyPlugin
 ```
 
-El build ejecuta **79 tests** (54 de plataforma, 23 puros y 2 de bundles). Resultado esperado de `verifyPlugin`:
+El build ejecuta **84 tests** (56 de plataforma/integración, 23 puros, 3 de rendimiento y 2 de bundles). Resultado esperado de `verifyPlugin`:
 
 ```
 IC-252.28539.97 (IntelliJ IDEA 2025.2.6.3): Compatible
@@ -141,6 +144,7 @@ La subida de una versión se hace manualmente:
 
 Aprovecha para revisar la ficha del plugin, que ya existe:
 
+- **Vendor / Organization**: NeoPlus (debe coincidir con `<vendor>` en `plugin.xml`)
 - **License**: Apache 2.0 (debe coincidir con `LICENSE`)
 - **Category**: Appearance (o Code editing, según las opciones disponibles)
 - **Tags**: `indent guides`, `indentation`, `editor`, `appearance`, `productivity`

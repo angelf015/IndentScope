@@ -1152,6 +1152,58 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
+    fun testHighlighterIsReusedAndRendererRefreshedWhenSettingsChange() {
+        val editor = configureBlockEditor()
+        activate(editor)
+        try {
+            val highlighter = customGuide(editor)
+            assertNotNull("Custom guide should be visible", highlighter)
+            val initialRenderer = highlighter!!.customRenderer as ActiveIndentGuideRenderer
+            assertNull("No custom color is configured initially", initialRenderer.customColor)
+
+            updateSettings {
+                customColorEnabled = true
+                customColorRgb = 0xFF0000
+                strokeWidth = 3.0
+            }
+
+            val updated = customGuide(editor)
+            assertSame(
+                "The same scope should keep and reuse its RangeHighlighter",
+                highlighter,
+                updated,
+            )
+            val updatedRenderer = updated!!.customRenderer as ActiveIndentGuideRenderer
+            assertEquals(
+                "Changing settings must refresh the renderer on the reused highlighter",
+                java.awt.Color(0xFF0000),
+                updatedRenderer.customColor,
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testReleasedEditorIsRemovedFromService() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\n    work()\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 4))
+        service.editorCreated(editor)
+        val before = service.registeredControllerCount()
+        assertTrue("The fixture editor should have a controller", before > 0)
+
+        service.editorReleased(editor)
+
+        assertEquals(
+            "Releasing an editor must remove its controller from the service map",
+            before - 1,
+            service.registeredControllerCount(),
+        )
+    }
+
     fun testSoftWrappedScopeStillPaints() {
         myFixture.configureByText(
             "Example.txt",

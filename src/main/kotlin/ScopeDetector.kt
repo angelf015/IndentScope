@@ -143,7 +143,11 @@ internal class ScopeDetector(
         var lastBodyLine = -1
         var closingLine = -1
         val scopeStartLine = scope?.bodyStartLine ?: openerLine
-        for (line in scopeStartLine + 1 until lineCount) {
+        // Bracket-backed scopes end at an exact offset. Indentation-only scopes
+        // (Python, for example) need a forward walk, so cap it to keep an unbalanced
+        // block in a huge generated file from scanning to EOF on every update.
+        val lastScannedLine = minOf(lineCount - 1, scopeStartLine + MAX_FORWARD_SCAN_LINES)
+        for (line in scopeStartLine + 1..lastScannedLine) {
             val indent = leadingIndentOrBlank(line)
             if (indent < 0) continue
 
@@ -296,7 +300,8 @@ internal class ScopeDetector(
     }
 
     private fun findPreviousNonBlankLine(line: Int): Int? {
-        for (previous in line - 1 downTo 0) {
+        val firstLine = maxOf(0, line - MAX_LOOKBACK_LINES)
+        for (previous in line - 1 downTo firstLine) {
             if (leadingIndentOrBlank(previous) >= 0) return previous
         }
         return null
@@ -315,7 +320,8 @@ internal class ScopeDetector(
     private fun findScopeOpenerLine(baseLine: Int, baseIndent: Int): Int? {
         if (opensBlock(baseLine, baseIndent) || opensMultilineBracketScope(baseLine)) return baseLine
 
-        for (line in baseLine - 1 downTo 0) {
+        val firstLine = maxOf(0, baseLine - MAX_LOOKBACK_LINES)
+        for (line in baseLine - 1 downTo firstLine) {
             val indent = leadingIndentOrBlank(line)
             if (indent >= 0 && indent < baseIndent) return line
         }
@@ -334,7 +340,8 @@ internal class ScopeDetector(
     }
 
     private fun opensBlock(line: Int, indent: Int): Boolean {
-        for (nextLine in line + 1 until lineCount) {
+        val lastLine = minOf(lineCount - 1, line + MAX_BLANK_LINE_SEARCH)
+        for (nextLine in line + 1..lastLine) {
             val nextIndent = leadingIndentOrBlank(nextLine)
             if (nextIndent < 0) continue
             return nextIndent > indent
@@ -346,14 +353,16 @@ internal class ScopeDetector(
         if (leadingIndentOrBlank(caretLine) >= 0) return caretLine
 
         var above: Int? = null
-        for (line in caretLine - 1 downTo 0) {
+        val firstLine = maxOf(0, caretLine - MAX_BLANK_LINE_SEARCH)
+        for (line in caretLine - 1 downTo firstLine) {
             if (leadingIndentOrBlank(line) >= 0) {
                 above = line
                 break
             }
         }
         var below: Int? = null
-        for (line in caretLine + 1 until lineCount) {
+        val lastLine = minOf(lineCount - 1, caretLine + MAX_BLANK_LINE_SEARCH)
+        for (line in caretLine + 1..lastLine) {
             if (leadingIndentOrBlank(line) >= 0) {
                 below = line
                 break
@@ -380,5 +389,12 @@ internal class ScopeDetector(
 
     private companion object {
         val DEFAULT_ALLOWED_OPENERS = setOf('{', '(', '[')
+
+        // Scopes are normally found within a few lines of the caret. These caps are
+        // safety valves for generated files with pathological block sizes; they are
+        // far above realistic source scopes, including very large modules.
+        const val MAX_LOOKBACK_LINES = 200_000
+        const val MAX_FORWARD_SCAN_LINES = 200_000
+        const val MAX_BLANK_LINE_SEARCH = 5_000
     }
 }

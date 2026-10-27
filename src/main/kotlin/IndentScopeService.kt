@@ -9,15 +9,21 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import java.beans.PropertyChangeListener
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Application-level owner of the current-scope guide state. It keeps one controller
  * per editor and coordinates the global toggle with the native indent-guide setting.
+ *
+ * The controller map is concurrent because editor lifecycle events can arrive from
+ * different platform threads, but every operation that touches an editor (markup
+ * model, settings) is confined to the EDT by the public methods below.
  */
 @Service(Service.Level.APP)
 class IndentScopeService : Disposable {
 
-    private val controllers = mutableMapOf<EditorEx, CurrentScopeIndentGuideController>()
+    private val controllers = ConcurrentHashMap<EditorEx, CurrentScopeIndentGuideController>()
+    @Volatile
     private var disposed = false
     private val settings: IndentScopeSettings
         get() = IndentScopeSettings.getInstance()
@@ -62,7 +68,16 @@ class IndentScopeService : Disposable {
         }
 
     fun editorCreated(editor: EditorEx) {
-        if (disposed || controllers.containsKey(editor)) return
+        if (disposed) return
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            runOnEdt { editorCreated(editor) }
+            return
+        }
+        if (editor.isDisposed || editor.isOneLineMode) return
+
+        pruneDisposedControllers()
+
+        if (controllers.containsKey(editor)) return
         if (!settings.shouldShowInEditor(editor.editorKind)) return
 
         val controller = CurrentScopeIndentGuideController(editor)
@@ -83,12 +98,14 @@ class IndentScopeService : Disposable {
         if (application.isDispatchThread) {
             registerOpenEditorsNow()
         } else {
-            application.invokeLater({ registerOpenEditorsNow() }, ModalityState.nonModal())
+            runOnEdt { registerOpenEditorsNow() }
         }
     }
 
     private fun registerOpenEditorsNow() {
         if (disposed) return
+        pruneDisposedControllers()
+
         val before = controllers.size
         EditorFactory.getInstance().allEditors.forEach { editor ->
             val editorEx = editor as? EditorEx ?: return@forEach
@@ -102,18 +119,30 @@ class IndentScopeService : Disposable {
     }
 
     fun editorReleased(editor: EditorEx) {
+        if (disposed) return
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            runOnEdt { editorReleased(editor) }
+            return
+        }
+
         controllers.remove(editor)?.dispose()
     }
 
     private fun onSettingsChanged() {
         if (disposed) return
+        if (!ApplicationManager.getApplication().isDispatchThread) {
+            runOnEdt { onSettingsChanged() }
+            return
+        }
+
+        pruneDisposedControllers()
 
         // Editor-type filters can change while editors of that kind are already
         // open. Dispose the controllers that are no longer wanted so they also
         // restore the native indent guides, then register the newly enabled ones.
         val disabled = controllers.filterKeys { !settings.shouldShowInEditor(it.editorKind) }
         disabled.forEach { (editor, controller) ->
-            controllers.remove(editor)
+            controllers.remove(editor, controller)
             controller.dispose()
         }
 
@@ -123,15 +152,33 @@ class IndentScopeService : Disposable {
 
     private fun onExternalIndentGuidesChanged() {
         if (disposed) return
+        runOnEdt {
+            if (!disposed) {
+                controllers.values.toList().forEach { it.onExternalIndentGuidesChanged() }
+            }
+        }
+    }
+
+    private fun pruneDisposedControllers() {
+        controllers.forEach { (editor, controller) ->
+            if (editor.isDisposed && controllers.remove(editor, controller)) {
+                controller.dispose()
+            }
+        }
+    }
+
+    private fun runOnEdt(action: () -> Unit) {
+        if (disposed) return
         ApplicationManager.getApplication().invokeLater(
             {
-                if (!disposed) {
-                    controllers.values.toList().forEach { it.onExternalIndentGuidesChanged() }
-                }
+                if (!disposed) action()
             },
             ModalityState.nonModal(),
         )
     }
+
+    /** Number of editors currently tracked. Used by diagnostics and lifecycle tests. */
+    internal fun registeredControllerCount(): Int = controllers.size
 
     override fun dispose() {
         if (disposed) return

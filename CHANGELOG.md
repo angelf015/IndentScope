@@ -2,6 +2,22 @@
 
 # IndentScope Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Vendor and organization name updated to **NeoPlus** for future releases.
+
+### Performance
+
+- The text fallback now indexes strings, comments and bracket pairs once per document snapshot. Repeated guide
+  updates no longer rescan the file from offset 0.
+- Scope analysis is cached by document stamp, tab size, enabled scope types and file identity, so caret movements
+  reuse the same bracket index.
+- The `RangeHighlighter` is reused while the scope range is unchanged, and style changes update its renderer in place.
+- Controller bookkeeping is confined to the EDT with a concurrent registry, and disposed editors are pruned.
+- Large-file scans have safety limits, and performance regression tests cover index reuse and very large files.
+
 ## [1.3.0] - 2026-10-26
 
 ### Added
