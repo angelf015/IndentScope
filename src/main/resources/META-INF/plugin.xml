@@ -21,25 +21,39 @@
         editor's original setting is restored when the feature is disabled.
         <br><br>
         Toggle it with <b>Ctrl+Alt+G</b> (<b>Cmd+Option+G</b> on macOS), from
-        <b>View → Appearance → IndentScope Guide</b>, or through the stable
+        <b>View → Appearance → IndentScope Guide</b>, through the status-bar widget, or with the stable
         <code>IndentScope.ToggleGuide</code> action ID for IdeaVim.
+        <br><br>
+        Customize scope types, stroke width, corner radius, native-guide behavior and the guide color in
+        <b>Settings → Tools → IndentScope</b>. The color is theme-aware and can also be changed in
+        <b>Settings → Editor → Color Scheme → IndentScope</b>. The interface is available in English and Spanish.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
 
+    <resource-bundle>messages.IndentScopeBundle</resource-bundle>
+
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <editorFactoryListener implementation="com.access.CurrentScopeIndentGuideFactoryListener"/>
+        <applicationConfigurable parentId="tools"
+                                 id="com.access.IndentScope.settings"
+                                 instance="com.access.IndentScopeConfigurable"
+                                 bundle="messages.IndentScopeBundle"
+                                 key="settings.displayName"/>
+        <colorSettingsPage implementation="com.access.IndentScopeColorSettingsPage"/>
+        <statusBarWidgetFactory id="IndentScope.status"
+                                implementation="com.access.IndentScopeStatusBarWidgetFactory"/>
     </extensions>
 
     <actions>
         <action id="IndentScope.ToggleGuide"
                 class="com.access.ToggleIndentScopeGuideAction"
-                text="IndentScope Guide"
-                description="Toggle the current-scope indent guide and restore the editor's native indent guides">
+                text="%action.toggle.text"
+                description="%action.toggle.description">
             <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt G"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt G"/>

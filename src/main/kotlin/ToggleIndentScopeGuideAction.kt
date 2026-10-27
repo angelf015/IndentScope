@@ -20,9 +20,9 @@ class ToggleIndentScopeGuideAction : ToggleAction(), DumbAware {
     override fun update(event: AnActionEvent) {
         super.update(event)
         event.presentation.text = if (isSelected(event)) {
-            "Hide IndentScope Guide"
+            IndentScopeBundle.message("action.toggle.hide")
         } else {
-            "Show IndentScope Guide"
+            IndentScopeBundle.message("action.toggle.show")
         }
     }
 }

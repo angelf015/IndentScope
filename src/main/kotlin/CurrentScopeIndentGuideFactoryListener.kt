@@ -2,14 +2,32 @@ package com.access
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.Alarm
 import java.awt.*
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import java.awt.geom.Path2D
+import javax.swing.SwingUtilities
+
+/**
+ * Whether the custom guide should be painted. With [onlyActiveEditor] disabled the
+ * guide is visible everywhere; otherwise it follows keyboard focus, which supports
+ * split editors without drawing a guide in every pane.
+ */
+internal fun shouldShowGuide(
+    enabled: Boolean,
+    onlyActiveEditor: Boolean,
+    focusOwner: Component?,
+    editorComponent: Component,
+): Boolean {
+    if (!enabled) return false
+    if (!onlyActiveEditor) return true
+    return focusOwner != null && SwingUtilities.isDescendingFrom(focusOwner, editorComponent)
+}
 
 /**
  * Registers editors with [IndentScopeService]. The application service owns the
@@ -45,6 +63,13 @@ internal class CurrentScopeIndentGuideController(
     private val listenerDisposable: Disposable = Disposer.newDisposable()
     private val updateAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, listenerDisposable)
     private val updateRequest = Runnable { updateHighlight() }
+    private val settings: IndentScopeSettings
+        get() = IndentScopeSettings.getInstance()
+    private val focusListener = object : FocusAdapter() {
+        override fun focusGained(e: FocusEvent) = onFocusChanged()
+
+        override fun focusLost(e: FocusEvent) = onFocusChanged()
+    }
 
     private var rangeHighlighter: RangeHighlighter? = null
     private var appliedGuide: ScopeGuide? = null
@@ -54,44 +79,88 @@ internal class CurrentScopeIndentGuideController(
     private var cachedTabSize = -1
     private var hasCachedGuide = false
     private var savedNativeIndentGuides: Boolean? = null
-    private var enabled = false
     private var disposed = false
 
     init {
         editor.caretModel.addCaretListener(this)
         editor.document.addDocumentListener(this, listenerDisposable)
+        editor.contentComponent.addFocusListener(focusListener)
     }
 
     /**
-     * Activates or deactivates the custom guide. `EditorSettings` is created per
-     * editor, so the native setting is captured and restored for this editor only.
-     * The service calls this for every open editor when the global toggle changes.
+     * Applies every persisted setting to this editor. The service calls this when
+     * the editor is created and whenever Settings → Tools → IndentScope changes.
      */
-    fun setEnabled(value: Boolean) {
-        if (disposed || editor.isDisposed || enabled == value) return
-        enabled = value
+    fun onSettingsChanged() {
+        if (disposed || editor.isDisposed) return
 
-        if (value) {
-            savedNativeIndentGuides = editor.settings.isIndentGuidesShown
-            editor.settings.isIndentGuidesShown = false
+        applyNativeGuidePolicy()
+        hasCachedGuide = false
+
+        if (settings.enabled) {
             updateHighlight()
         } else {
             updateAlarm.cancelAllRequests()
             clearHighlight()
-            savedNativeIndentGuides?.let { editor.settings.isIndentGuidesShown = it }
-            savedNativeIndentGuides = null
         }
     }
 
+    /**
+     * Hides native guides only while the custom guide is active and the user did not
+     * ask to keep them. The original per-editor value is captured once and restored
+     * when the feature is disabled, when native guides are re-enabled, or on dispose.
+     */
+    private fun applyNativeGuidePolicy() {
+        if (editor.isDisposed) return
+
+        val shouldHide = settings.enabled && !settings.getState().keepNativeGuides
+        if (shouldHide) {
+            if (savedNativeIndentGuides == null) {
+                savedNativeIndentGuides = editor.settings.isIndentGuidesShown
+            }
+            if (editor.settings.isIndentGuidesShown) {
+                editor.settings.isIndentGuidesShown = false
+            }
+        } else {
+            restoreNativeGuides()
+        }
+    }
+
+    private fun restoreNativeGuides() {
+        savedNativeIndentGuides?.let { saved ->
+            if (editor.settings.isIndentGuidesShown != saved) {
+                editor.settings.isIndentGuidesShown = saved
+            }
+        }
+        savedNativeIndentGuides = null
+    }
+
+    private fun onFocusChanged() {
+        if (!settings.getState().showOnlyInActiveEditor) return
+        // Wait until the focus transfer finishes before deciding which editor owns it.
+        scheduleUpdate()
+    }
+
+    private fun shouldDrawGuide(): Boolean {
+        if (disposed || editor.isDisposed) return false
+        val state = settings.getState()
+        return shouldShowGuide(
+            enabled = settings.enabled,
+            onlyActiveEditor = state.showOnlyInActiveEditor,
+            focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
+            editorComponent = editor.contentComponent,
+        )
+    }
+
     override fun caretPositionChanged(event: CaretEvent) {
-        if (!enabled) return
+        if (!settings.enabled) return
         // The guide depends on the caret line only, so horizontal moves are free.
         if (event.oldPosition.line == event.newPosition.line) return
         scheduleUpdate()
     }
 
     override fun documentChanged(event: DocumentEvent) {
-        if (!enabled) return
+        if (!settings.enabled) return
         scheduleUpdate()
     }
 
@@ -102,7 +171,8 @@ internal class CurrentScopeIndentGuideController(
         updateAlarm.cancelAllRequests()
         if (!editor.isDisposed) {
             editor.caretModel.removeCaretListener(this)
-            savedNativeIndentGuides?.let { editor.settings.isIndentGuidesShown = it }
+            editor.contentComponent.removeFocusListener(focusListener)
+            restoreNativeGuides()
         }
         Disposer.dispose(listenerDisposable)
         clearHighlight()
@@ -113,13 +183,16 @@ internal class CurrentScopeIndentGuideController(
      * keeps fast typing and rapid navigation cheap on large files.
      */
     private fun scheduleUpdate() {
-        if (!enabled || disposed || editor.isDisposed) return
+        if (!settings.enabled || disposed || editor.isDisposed) return
         updateAlarm.cancelRequest(updateRequest)
         updateAlarm.addRequest(updateRequest, UPDATE_DELAY_MS)
     }
 
     private fun updateHighlight() {
-        if (!enabled || disposed || editor.isDisposed) return
+        if (!shouldDrawGuide()) {
+            clearHighlight()
+            return
+        }
 
         val guide = getCurrentGuide()
         if (guide == appliedGuide && (guide == null || rangeHighlighter?.isValid == true)) return
@@ -127,6 +200,7 @@ internal class CurrentScopeIndentGuideController(
         clearHighlight()
         if (guide == null) return
 
+        val state = settings.getState()
         val document = editor.document
         val highlighter = editor.markupModel.addRangeHighlighter(
             document.getLineStartOffset(guide.anchorLine),
@@ -138,6 +212,9 @@ internal class CurrentScopeIndentGuideController(
         highlighter.customRenderer = ActiveIndentGuideRenderer(
             anchorLine = guide.anchorLine,
             endLine = guide.endLine,
+            strokeWidth = state.strokeWidth.toFloat(),
+            cornerRadius = state.cornerRadius.toFloat(),
+            customColor = if (state.customColorEnabled) Color(state.customColorRgb) else null,
         )
         rangeHighlighter = highlighter
         appliedGuide = guide
@@ -176,7 +253,7 @@ internal class CurrentScopeIndentGuideController(
         val lines = DocumentLineMap(document)
         val brackets = BracketScanner(editor, chars, lines)
         val caretLine = editor.caretModel.logicalPosition.line
-        return ScopeDetector(chars, lines, brackets, tabSize).findGuide(caretLine)
+        return ScopeDetector(chars, lines, brackets, tabSize, settings.allowedOpeners()).findGuide(caretLine)
     }
 
     private fun clearHighlight() {
@@ -197,11 +274,12 @@ internal class CurrentScopeIndentGuideController(
 private class ActiveIndentGuideRenderer(
     private val anchorLine: Int,
     private val endLine: Int,
+    private val strokeWidth: Float,
+    private val cornerRadius: Float,
+    private val customColor: Color?,
 ) : CustomHighlighterRenderer {
     override fun paint(editor: Editor, highlighter: RangeHighlighter, graphics: Graphics) {
-        val color = editor.colorsScheme.getColor(EditorColors.SELECTED_INDENT_GUIDE_COLOR)
-            ?: editor.colorsScheme.getColor(EditorColors.INDENT_GUIDE_COLOR)
-            ?: return
+        val color = customColor ?: IndentScopeColors.guideColor(editor.colorsScheme) ?: return
 
         // The guide starts at the line that opens the scope and ends at its closing
         // bracket (a `}`, `)` or `]` line), so it covers the whole block. The vertical
@@ -232,7 +310,11 @@ private class ActiveIndentGuideRenderer(
         try {
             copy.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             copy.color = color
-            copy.stroke = BasicStroke(STROKE_WIDTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            copy.stroke = BasicStroke(
+                strokeWidth.coerceAtLeast(MIN_STROKE_WIDTH),
+                BasicStroke.CAP_ROUND,
+                BasicStroke.JOIN_ROUND,
+            )
             copy.draw(
                 createScopePath(
                     guideX = guideX,
@@ -241,6 +323,7 @@ private class ActiveIndentGuideRenderer(
                     lastTextX = lastAnchor.x,
                     lastY = lastAnchor.y + halfLine,
                     drawArms = drawArms,
+                    cornerRadius = cornerRadius,
                 ),
             )
         } finally {
@@ -266,7 +349,7 @@ private class ActiveIndentGuideRenderer(
     }
 
     private companion object {
-        private const val STROKE_WIDTH = 1.5f
+        private const val MIN_STROKE_WIDTH = 0.5f
     }
 }
 
@@ -285,6 +368,7 @@ internal fun createScopePath(
     lastTextX: Int,
     lastY: Int,
     drawArms: Boolean,
+    cornerRadius: Float = DEFAULT_CORNER_RADIUS,
 ): Path2D.Float {
     val x = guideX.toFloat()
     val topArmEnd = if (drawArms) maxOf(firstTextX.toFloat(), x) else x
@@ -292,7 +376,7 @@ internal fun createScopePath(
     val path = Path2D.Float()
 
     val radius = minOf(
-        CORNER_RADIUS,
+        cornerRadius.coerceAtLeast(0f),
         (topArmEnd - x).coerceAtLeast(0f),
         (bottomArmEnd - x).coerceAtLeast(0f),
         (lastY - firstY).toFloat() / 2f,
@@ -314,4 +398,4 @@ internal fun createScopePath(
     return path
 }
 
-private const val CORNER_RADIUS = 4f
+private const val DEFAULT_CORNER_RADIUS = 4f

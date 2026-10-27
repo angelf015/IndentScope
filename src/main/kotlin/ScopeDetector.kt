@@ -85,6 +85,7 @@ internal class ScopeDetector(
     private val lines: LineMap,
     private val brackets: BracketResolver,
     tabSize: Int,
+    private val allowedOpeners: Set<Char> = DEFAULT_ALLOWED_OPENERS,
 ) {
     private val tabSize = tabSize.coerceAtLeast(1)
     private val lineCount = lines.lineCount
@@ -92,22 +93,44 @@ internal class ScopeDetector(
     fun findGuide(caretLine: Int): ScopeGuide? {
         if (lineCount == 0) return null
 
-        val baseLine = findNearestNonBlankLine(caretLine.coerceIn(0, lineCount - 1)) ?: return null
-        val baseIndent = leadingIndentOrBlank(baseLine)
-        if (baseIndent < 0) return null
+        var baseLine = findNearestNonBlankLine(caretLine.coerceIn(0, lineCount - 1)) ?: return null
 
-        // The guide belongs to the innermost block containing the caret. That block is
-        // opened either by the base line itself (e.g. when the caret is on the `if`
-        // line) or by the nearest non-blank line above it with a smaller indentation.
-        // Anchoring the guide to that line is what IntelliJ does for regular indent
-        // guides, instead of drawing it next to the block contents.
-        val detectedOpenerLine = findScopeOpenerLine(baseLine, baseIndent) ?: return null
-        val openerLine = adjustOpenerLine(detectedOpenerLine)
-        val indentColumn = leadingIndentOrBlank(openerLine)
-        if (indentColumn < 0) return null
+        while (true) {
+            val baseIndent = leadingIndentOrBlank(baseLine)
+            if (baseIndent < 0) return null
 
-        val scope = resolveScope(openerLine)
+            // The guide belongs to the innermost block containing the caret. That block is
+            // opened either by the base line itself (e.g. when the caret is on the `if`
+            // line) or by the nearest non-blank line above it with a smaller indentation.
+            // Anchoring the guide to that line is what IntelliJ does for regular indent
+            // guides, instead of drawing it next to the block contents.
+            val detectedOpenerLine = findScopeOpenerLine(baseLine, baseIndent) ?: return null
+            val openerLine = adjustOpenerLine(detectedOpenerLine)
+            val indentColumn = leadingIndentOrBlank(openerLine)
+            if (indentColumn < 0) return null
 
+            val scope = resolveScope(openerLine)
+            if (isScopeTypeAllowed(scope)) {
+                return buildGuide(openerLine, indentColumn, scope)
+            }
+
+            // The innermost scope has a type the user disabled (for example, a
+            // multi-line call when parentheses are hidden). Continue with the nearest
+            // enclosing candidate so the caret still gets the closest enabled guide.
+            baseLine = findPreviousNonBlankLine(openerLine) ?: return null
+        }
+    }
+
+    private fun isScopeTypeAllowed(scope: ScopeInfo?): Boolean =
+        if (scope == null) {
+            // An indentation-only scope (such as Python's `def`) belongs to the
+            // "blocks" family because it has no bracket of its own.
+            '{' in allowedOpeners
+        } else {
+            scope.opener in allowedOpeners
+        }
+
+    private fun buildGuide(openerLine: Int, indentColumn: Int, scope: ScopeInfo?): ScopeGuide? {
         val knownEndLine = scope?.endLine
         if (knownEndLine != null) {
             // Exact bracket matching knows the closing line even when the block has
@@ -194,6 +217,7 @@ internal class ScopeDetector(
         if (opener.char == '{') {
             val closeOffset = brackets.matchingCloser(opener)
             return ScopeInfo(
+                opener = '{',
                 closer = '}',
                 bodyStartLine = openerLine,
                 endLine = closeOffset?.let { lines.lineNumber(it) },
@@ -202,6 +226,7 @@ internal class ScopeDetector(
         }
 
         val closeOffset = brackets.matchingCloser(opener) ?: return ScopeInfo(
+            opener = opener.char,
             closer = matchingCloser(opener.char),
             bodyStartLine = openerLine,
             anchorLine = openerLine,
@@ -212,6 +237,7 @@ internal class ScopeDetector(
             val blockScope = BracketOpener('{', blockOpenOffset)
             val blockCloseOffset = brackets.matchingCloser(blockScope)
             return ScopeInfo(
+                opener = '{',
                 closer = '}',
                 bodyStartLine = lines.lineNumber(blockOpenOffset),
                 endLine = blockCloseOffset?.let { lines.lineNumber(it) },
@@ -220,6 +246,7 @@ internal class ScopeDetector(
         }
 
         return ScopeInfo(
+            opener = opener.char,
             closer = matchingCloser(opener.char),
             bodyStartLine = openerLine,
             endLine = lines.lineNumber(closeOffset),
@@ -344,9 +371,14 @@ internal class ScopeDetector(
     }
 
     private data class ScopeInfo(
+        val opener: Char,
         val closer: Char?,
         val bodyStartLine: Int,
         val endLine: Int? = null,
         val anchorLine: Int,
     )
+
+    private companion object {
+        val DEFAULT_ALLOWED_OPENERS = setOf('{', '(', '[')
+    }
 }

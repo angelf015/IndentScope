@@ -2,10 +2,25 @@
 
 # IndentScope Changelog
 
-## [1.2.2] - 2026-10-26
+## [1.3.0] - 2026-10-26
+
+### Added
+
+- Settings panel at **Settings → Tools → IndentScope** with global enable, native-guide policy, active-editor-only
+  mode, scope-type filters, stroke width, corner radius and an optional custom guide color.
+- Theme-aware guide color with a dedicated **IndentScope** page under **Settings → Editor → Color Scheme**.
+- Status-bar widget that shows the current state and toggles the guide on click.
+- Scope-type filtering for blocks `{ }`, parentheses `( )` and brackets `[ ]`. Disabled types fall back outward to
+  the nearest enabled enclosing scope instead of hiding the guide entirely.
+- English and Spanish interface through localized resource bundles.
 
 ### Changed
 
+- Settings now persist through a `PersistentStateComponent` in `indentScope.xml`. The legacy `IndentScope.enabled`
+  value from `PropertiesComponent` is migrated automatically on first load.
+- The guide appearance is configurable: stroke width from 1.0 to 4.0 px and corner radius from 0 to 12 px.
+- Native indent guides can be kept visible while the custom guide is active, and the guide can be limited to the
+  editor that currently has keyboard focus.
 - The plugin now declares `require-restart="true"`, so installation, update, and uninstallation require an IDE
   restart. This guarantees the guide is active immediately after a first install instead of waiting for the next
   manual restart.

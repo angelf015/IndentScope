@@ -1,6 +1,5 @@
 package com.access
 
-import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUiKind
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -25,6 +24,26 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
             "The plugin must require a restart so it activates right after installation",
             "true",
             document.documentElement.getAttribute("require-restart"),
+        )
+        assertEquals(
+            "Settings must be registered under Tools",
+            1,
+            document.getElementsByTagName("applicationConfigurable").length,
+        )
+        assertEquals(
+            "The color settings page must be registered",
+            1,
+            document.getElementsByTagName("colorSettingsPage").length,
+        )
+        assertEquals(
+            "The status bar widget must be registered",
+            1,
+            document.getElementsByTagName("statusBarWidgetFactory").length,
+        )
+        assertEquals(
+            "User-visible strings are loaded from the plugin bundle",
+            "messages.IndentScopeBundle",
+            document.getElementsByTagName("resource-bundle").item(0).textContent,
         )
     }
 
@@ -64,6 +83,21 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
 
     private val service: IndentScopeService
         get() = ApplicationManager.getApplication().getService(IndentScopeService::class.java)
+
+    private var originalSettings: IndentScopeSettings.State? = null
+
+    override fun setUp() {
+        super.setUp()
+        originalSettings = IndentScopeSettings.getInstance().getState().copy()
+    }
+
+    override fun tearDown() {
+        try {
+            originalSettings?.let { IndentScopeSettings.getInstance().apply(it) }
+        } finally {
+            super.tearDown()
+        }
+    }
 
     fun testNativeIndentGuideSettingIsPerEditor() {
         myFixture.configureByText("Example.txt", "a\nb\n")
@@ -133,18 +167,171 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
-    fun testEnabledStateUsesTrueAsDefault() {
-        val properties = PropertiesComponent.getInstance()
-        properties.unsetValue(ENABLED_KEY)
-        assertTrue(service.enabled)
+    fun testSettingsDefaultToEnabledAndPersistState() {
+        val settings = IndentScopeSettings.getInstance()
+        settings.apply(IndentScopeSettings.State())
 
-        service.enabled = false
-        assertEquals("false", properties.getValue(ENABLED_KEY))
-        assertFalse(service.enabled)
+        assertTrue("The guide is enabled by default", settings.enabled)
+        assertEquals(IndentScopeSettings.State(), settings.getState())
 
-        service.enabled = true
-        assertNull(properties.getValue(ENABLED_KEY))
-        assertTrue(service.enabled)
+        settings.enabled = false
+        assertFalse(settings.enabled)
+        assertFalse(
+            "The exported PersistentStateComponent state must carry the toggle",
+            settings.getState().enabled,
+        )
+
+        settings.enabled = true
+        assertTrue(settings.getState().enabled)
+    }
+
+    fun testLegacyEnabledValueIsMigrated() {
+        val properties = com.intellij.ide.util.PropertiesComponent.getInstance()
+        val settings = IndentScopeSettings.getInstance()
+
+        properties.setValue(LEGACY_ENABLED_KEY, "false")
+        settings.noStateLoaded()
+
+        assertFalse("The old PropertiesComponent toggle must be preserved", settings.enabled)
+        assertNull(
+            "The legacy key is removed after migration",
+            properties.getValue(LEGACY_ENABLED_KEY),
+        )
+    }
+
+    fun testParenthesesCanBeDisabledAndBlockGuideRemains() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            fun main() {
+                foo(
+                    first,
+                    second,
+                )
+            }
+            """.trimIndent(),
+        )
+        updateSettings { showParenScopes = false }
+
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testBlocksCanBeDisabledWhileParenthesesRemain() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            fun main() {
+                foo(
+                    first,
+                    second,
+                )
+            }
+            """.trimIndent(),
+        )
+        updateSettings {
+            showBraceScopes = false
+            showParenScopes = true
+        }
+
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 4)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testBracketsCanBeDisabledAndBlockGuideRemains() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            {
+              "items": [
+                "first",
+                "second"
+              ]
+            }
+            """.trimIndent(),
+        )
+        updateSettings { showBracketScopes = false }
+
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 6))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testDisablingAllScopeTypesHidesGuide() {
+        val editor = configureBlockEditor()
+        updateSettings {
+            showBraceScopes = false
+            showParenScopes = false
+            showBracketScopes = false
+        }
+        activate(editor)
+        try {
+            assertNull("No scope type is enabled", customGuide(editor))
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testNativeGuidesCanBeKeptVisible() {
+        val editor = configureBlockEditor()
+        editor.settings.isIndentGuidesShown = true
+        updateSettings { keepNativeGuides = true }
+        activate(editor)
+        try {
+            assertTrue("The custom guide should remain available", hasCustomGuide(editor))
+            assertTrue("Native guides must stay visible when requested", editor.settings.isIndentGuidesShown)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testSettingsConfigurableCanBeCreated() {
+        val configurable = IndentScopeConfigurable()
+        assertEquals("com.access.IndentScope.settings", configurable.id)
+        assertEquals("IndentScope", configurable.displayName)
+
+        val component = configurable.createComponent()
+        assertNotNull(component)
+        assertFalse("A freshly reset panel should not be modified", configurable.isModified())
+        configurable.disposeUIResources()
+    }
+
+    fun testColorSettingsPageExposesGuideColor() {
+        val page = IndentScopeColorSettingsPage()
+        assertEquals("IndentScope", page.displayName)
+        assertEquals(1, page.attributeDescriptors.size)
+        assertTrue(
+            "The demo text must use the guide highlighting tag",
+            page.additionalHighlightingTagToDescriptorMap.containsKey("guide"),
+        )
+    }
+
+    fun testStatusBarWidgetIsCreated() {
+        val factory = IndentScopeStatusBarWidgetFactory()
+        val widget = factory.createWidget(project)
+        try {
+            assertEquals(IndentScopeStatusBarWidgetFactory.WIDGET_ID, widget.ID())
+            assertTrue(widget.getPresentation() is com.intellij.openapi.wm.StatusBarWidget.TextPresentation)
+        } finally {
+            widget.dispose()
+        }
     }
 
     fun testActionIdIsRegisteredForIdeaVim() {
@@ -827,12 +1014,17 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
     }
 
     private fun activate(editor: EditorEx) {
-        PropertiesComponent.getInstance().unsetValue(ENABLED_KEY)
+        IndentScopeSettings.getInstance().enabled = true
         // The fixture editor is registered by the plugin listener as soon as it is
         // created (with the caret on line 0), so recreate the controller once the
         // caret is inside the block to get a deterministic synchronous update.
         service.editorReleased(editor)
         service.editorCreated(editor)
+    }
+
+    private fun updateSettings(block: IndentScopeSettings.State.() -> Unit) {
+        val settings = IndentScopeSettings.getInstance()
+        settings.apply(settings.getState().copy().apply(block))
     }
 
     private fun customGuide(editor: EditorEx): RangeHighlighter? =
@@ -859,6 +1051,6 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
     private fun hasCustomGuide(editor: EditorEx): Boolean = customGuide(editor) != null
 
     private companion object {
-        private const val ENABLED_KEY = "IndentScope.enabled"
+        private const val LEGACY_ENABLED_KEY = "IndentScope.enabled"
     }
 }

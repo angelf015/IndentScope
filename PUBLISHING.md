@@ -1,10 +1,10 @@
 # Publicar IndentScope
 
-Guía para publicar la versión **1.2.2** en GitHub y en JetBrains Marketplace. Todos los comandos se ejecutan desde la raíz
+Guía para publicar la versión **1.3.0** en GitHub y en JetBrains Marketplace. Todos los comandos se ejecutan desde la raíz
 del repositorio.
 
 > El plugin ya está publicado en JetBrains Marketplace como **IndentScope** (ID `35438`, XML ID
-> `com.access.IndentScope`) con licencia Apache 2.0. La versión 1.2.2 se sube como **actualización**, no como plugin
+> `com.access.IndentScope`) con licencia Apache 2.0. La versión 1.3.0 se sube como **actualización**, no como plugin
 > nuevo.
 
 > Los cambios de esta versión están sin commitear a propósito. Revisa `git diff` antes de confirmar nada.
@@ -26,13 +26,16 @@ IU-262.10968.63 (IntelliJ IDEA 2026.2.3): Compatible
 Dynamic Plugin Eligibility: Plugin can probably be enabled or disabled without IDE restart
 ```
 
+> Pueden aparecer 3 avisos de API obsoleta: la creación de `TextAttributesKey` con atributos por defecto y el puente
+> generado por Kotlin para `StatusBarWidget.getPresentation()`. Son avisos, no incompatibilidades.
+
 > Esa última línea evalúa el código del plugin y no tiene en cuenta `require-restart="true"`. El IDE sí lee el atributo
 > (`PluginDescriptor.isRequireRestart`) y fuerza el reinicio al instalar, actualizar o desinstalar.
 
 El ZIP se genera en:
 
 ```
-build/distributions/IndentScope-1.2.2.zip
+build/distributions/IndentScope-1.3.0.zip
 ```
 
 Antes de subirlo, pruébalo con **Settings → Plugins → Install Plugin from Disk** en una instancia limpia de IntelliJ IDEA
@@ -43,7 +46,7 @@ Antes de subirlo, pruébalo con **Settings → Plugins → Install Plugin from D
 La versión se define en `gradle.properties` y debe coincidir con la sección superior de `CHANGELOG.md`:
 
 ```properties
-version=1.2.2
+version=1.3.0
 ```
 
 El changelog se inserta automáticamente en `plugin.xml` como `<change-notes>` durante `patchPluginXml`. No publiques dos
@@ -83,7 +86,7 @@ cd /Users/arch/workspace/java/IndentScope
 Cuando `signPlugin` está configurado, el ZIP firmado se genera junto al original con el sufijo `-signed`:
 
 ```
-build/distributions/IndentScope-1.2.2-signed.zip
+build/distributions/IndentScope-1.3.0-signed.zip
 ```
 
 Ese es el archivo que debes subir al Marketplace. Si no quieres firmar todavía, sube el ZIP sin firmar; el Marketplace lo
@@ -98,23 +101,23 @@ git status
 git diff
 
 git add .
-git commit -m "Release 1.2.2: mandatory restart, multiline scopes and DTO guides"
+git commit -m "Release 1.3.0: settings, personalization and robust scope detection"
 git push origin main
 ```
 
 Crea la etiqueta y súbela:
 
 ```bash
-git tag -a v1.2.2 -m "IndentScope 1.2.2"
-git push origin v1.2.2
+git tag -a v1.3.0 -m "IndentScope 1.3.0"
+git push origin v1.3.0
 ```
 
 Después, en GitHub:
 
 1. Abre **Releases → Draft a new release**.
-2. Selecciona la etiqueta `v1.2.2`.
-3. Título: `IndentScope 1.2.2`.
-4. Pega la sección `[1.2.2]` de `CHANGELOG.md` como notas.
+2. Selecciona la etiqueta `v1.3.0`.
+3. Título: `IndentScope 1.3.0`.
+4. Pega la sección `[1.3.0]` de `CHANGELOG.md` como notas.
 5. Adjunta el ZIP de `build/distributions/`.
 6. Publica la release.
 
@@ -128,11 +131,11 @@ La subida de una versión se hace manualmente:
 1. Inicia sesión en [JetBrains Marketplace](https://plugins.jetbrains.com/author/me) con tu JetBrains Account.
 2. Abre la página del plugin **IndentScope** y pulsa **Upload new version**.
 3. Rellena el formulario de la versión:
-   - **Version**: `1.2.2`
+   - **Version**: `1.3.0`
    - **Since build**: `252`
    - **Until build**: vacío (compatible con todas las versiones posteriores)
    - **Channel**: vacío (canal estable)
-   - **Change notes**: copia la sección `[1.2.2]` de `CHANGELOG.md`
+   - **Change notes**: copia la sección `[1.3.0]` de `CHANGELOG.md`
 4. Sube el ZIP firmado (o el ZIP sin firmar si aún no firmas).
 5. Envía la versión a revisión.
 
@@ -160,8 +163,13 @@ the scope through its closing }, ) or ].
 It supports nested blocks, multi-line parentheses and brackets. Native indent guides are hidden only while the custom
 guide is active, and each editor's original setting is restored when the feature is disabled.
 
-Toggle it with Ctrl+Alt+G (Cmd+Option+G on macOS), from View → Appearance → IndentScope Guide, or with the stable
-IndentScope.ToggleGuide action ID in IdeaVim.
+Customize scope types, stroke width, corner radius, native-guide behavior and the guide color in
+Settings → Tools → IndentScope. The color is theme-aware and can also be changed in
+Settings → Editor → Color Scheme → IndentScope. The status bar includes a quick toggle, and the UI is available in
+English and Spanish.
+
+Toggle it with Ctrl+Alt+G (Cmd+Option+G on macOS), from View → Appearance → IndentScope Guide, through the status-bar
+widget, or with the stable IndentScope.ToggleGuide action ID in IdeaVim.
 
 Requires IntelliJ Platform 2025.2 (build 252) or newer. Verified with IntelliJ IDEA 2025.2.6.3 and 2026.2.3.
 ```
