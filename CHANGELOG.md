@@ -12,6 +12,8 @@
 - Status-bar widget that shows the current state and toggles the guide on click.
 - Scope-type filtering for blocks `{ }`, parentheses `( )` and brackets `[ ]`. Disabled types fall back outward to
   the nearest enabled enclosing scope instead of hiding the guide entirely.
+- Optional guide in console, diff and preview editors. These auxiliary surfaces are independent and disabled by
+  default; main editors are always included.
 - English and Spanish interface through localized resource bundles.
 
 ### Changed
@@ -26,6 +28,13 @@
   manual restart.
 - Scope detection now uses the language brace matcher when available and falls back to a text scanner for plain
   files and unsupported editors.
+- With multiple carets, only the primary caret defines the current scope. Adding or removing carets refreshes the guide.
+- Soft-wrapped scopes skip the continuation rows whose text starts to the left of the guide, so the vertical stroke no
+  longer paints over wrapped content. The rounded arms remain on the first and last rows.
+- HiDPI rendering keeps stroke width and corner radius in logical pixels. The editor already scales its `Graphics2D`,
+  so the guide is no longer at risk of being scaled twice.
+- Changes to the IDE's **Show indent guides** option are reapplied while the plugin is active, and the latest user
+  preference is preserved for restoration when the plugin is disabled.
 
 ### Fixed
 
@@ -40,6 +49,8 @@
 - Allman-style declarations now start the guide at the declaration line instead of the `{` line.
 - Top-level unbraced scopes, such as Python `def` and `class` blocks, now show their guide.
 - Multi-line empty blocks now show their guide; blocks that open and close on the same line intentionally show none.
+- A collapsed fold that hides the scope opener or its closing line now hides the guide instead of leaving a stale
+  vertical stroke. Folds inside the scope body keep the outer guide, and expanding the fold restores it immediately.
 
 ## [1.2.1] - 2026-10-26
 

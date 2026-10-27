@@ -18,7 +18,7 @@ Requiere JDK 21.
 ./gradlew verifyPlugin
 ```
 
-Resultado esperado de `verifyPlugin`:
+El build ejecuta **79 tests** (54 de plataforma, 23 puros y 2 de bundles). Resultado esperado de `verifyPlugin`:
 
 ```
 IC-252.28539.97 (IntelliJ IDEA 2025.2.6.3): Compatible
@@ -101,7 +101,7 @@ git status
 git diff
 
 git add .
-git commit -m "Release 1.3.0: settings, personalization and robust scope detection"
+git commit -m "Release 1.3.0: settings, visual robustness and personalized guide"
 git push origin main
 ```
 
@@ -161,9 +161,11 @@ IndentScope draws a rounded bracket on the indent guide of the scope that contai
 the scope through its closing }, ) or ].
 
 It supports nested blocks, multi-line parentheses and brackets. Native indent guides are hidden only while the custom
-guide is active, and each editor's original setting is restored when the feature is disabled.
+guide is active, and each editor's original setting is restored when the feature is disabled. The guide also copes with
+collapsed folds, soft-wrapped lines, multiple carets and HiDPI displays, and it can optionally appear in console, diff
+and preview editors.
 
-Customize scope types, stroke width, corner radius, native-guide behavior and the guide color in
+Customize scope types, stroke width, corner radius, native-guide behavior, auxiliary editor types and the guide color in
 Settings → Tools → IndentScope. The color is theme-aware and can also be changed in
 Settings → Editor → Color Scheme → IndentScope. The status bar includes a quick toggle, and the UI is available in
 English and Spanish.

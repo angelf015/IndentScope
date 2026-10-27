@@ -68,6 +68,23 @@ class IndentScopeConfigurable : SearchableConfigurable {
                         .bindSelected(draft::showBracketScopes)
                 }
             }
+            group(IndentScopeBundle.message("settings.group.editorTypes")) {
+                row {
+                    checkBox(IndentScopeBundle.message("settings.showInConsoleEditors"))
+                        .bindSelected(draft::showInConsoleEditors)
+                }
+                row {
+                    checkBox(IndentScopeBundle.message("settings.showInDiffEditors"))
+                        .bindSelected(draft::showInDiffEditors)
+                }
+                row {
+                    checkBox(IndentScopeBundle.message("settings.showInPreviewEditors"))
+                        .bindSelected(draft::showInPreviewEditors)
+                }
+                row {
+                    comment(IndentScopeBundle.message("settings.editorTypesHint"))
+                }
+            }
             group(IndentScopeBundle.message("settings.group.appearance")) {
                 row(IndentScopeBundle.message("settings.strokeWidth")) {
                     spinner(IndentScopeSettings.MIN_STROKE_WIDTH..IndentScopeSettings.MAX_STROKE_WIDTH, 0.5)
@@ -132,6 +149,9 @@ class IndentScopeConfigurable : SearchableConfigurable {
         draft.showBraceScopes = source.showBraceScopes
         draft.showParenScopes = source.showParenScopes
         draft.showBracketScopes = source.showBracketScopes
+        draft.showInConsoleEditors = source.showInConsoleEditors
+        draft.showInDiffEditors = source.showInDiffEditors
+        draft.showInPreviewEditors = source.showInPreviewEditors
         draft.strokeWidth = source.strokeWidth
         draft.cornerRadius = source.cornerRadius
         draft.customColorEnabled = source.customColorEnabled

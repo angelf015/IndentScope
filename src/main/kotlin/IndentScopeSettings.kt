@@ -7,6 +7,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.SettingsCategory
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
+import com.intellij.openapi.editor.EditorKind
 import com.intellij.util.messages.Topic
 
 /**
@@ -33,6 +34,9 @@ class IndentScopeSettings : PersistentStateComponent<IndentScopeSettings.State> 
         var showBraceScopes: Boolean = true,
         var showParenScopes: Boolean = true,
         var showBracketScopes: Boolean = true,
+        var showInConsoleEditors: Boolean = false,
+        var showInDiffEditors: Boolean = false,
+        var showInPreviewEditors: Boolean = false,
         var strokeWidth: Double = DEFAULT_STROKE_WIDTH,
         var cornerRadius: Int = DEFAULT_CORNER_RADIUS,
         var customColorEnabled: Boolean = false,
@@ -78,6 +82,13 @@ class IndentScopeSettings : PersistentStateComponent<IndentScopeSettings.State> 
         if (myState.showParenScopes) add('(')
         if (myState.showBracketScopes) add('[')
     }
+
+    fun shouldShowInEditor(kind: EditorKind): Boolean = isEditorKindEnabled(
+        kind = kind,
+        showInConsoleEditors = myState.showInConsoleEditors,
+        showInDiffEditors = myState.showInDiffEditors,
+        showInPreviewEditors = myState.showInPreviewEditors,
+    )
 
     private fun notifyChanged() {
         val application = ApplicationManager.getApplication() ?: return

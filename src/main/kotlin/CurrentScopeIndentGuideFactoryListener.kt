@@ -4,6 +4,8 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
+import com.intellij.openapi.editor.ex.FoldingListener
 import com.intellij.openapi.editor.markup.*
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.Alarm
@@ -85,6 +87,17 @@ internal class CurrentScopeIndentGuideController(
         editor.caretModel.addCaretListener(this)
         editor.document.addDocumentListener(this, listenerDisposable)
         editor.contentComponent.addFocusListener(focusListener)
+        editor.foldingModel.addListener(
+            object : FoldingListener {
+                override fun onFoldProcessingEnd() {
+                    // Folding changes the visible extent of the guide, not the
+                    // logical scope, so the next update only needs to re-evaluate
+                    // visibility and the painted path.
+                    scheduleUpdate()
+                }
+            },
+            listenerDisposable,
+        )
     }
 
     /**
@@ -97,12 +110,27 @@ internal class CurrentScopeIndentGuideController(
         applyNativeGuidePolicy()
         hasCachedGuide = false
 
-        if (settings.enabled) {
+        if (settings.enabled && settings.shouldShowInEditor(editor.editorKind)) {
             updateHighlight()
         } else {
             updateAlarm.cancelAllRequests()
             clearHighlight()
         }
+    }
+
+    /**
+     * The IDE's global "Show indent guides" setting can change while the custom
+     * guide is active. When the plugin is responsible for hiding native guides,
+     * capture the user's new preference and apply the policy again. This keeps the
+     * displayed state consistent and restores the latest preference on disable.
+     */
+    fun onExternalIndentGuidesChanged() {
+        if (disposed || editor.isDisposed) return
+        if (!settings.enabled || !settings.shouldShowInEditor(editor.editorKind)) return
+        if (settings.getState().keepNativeGuides) return
+
+        savedNativeIndentGuides = EditorSettingsExternalizable.getInstance().isIndentGuidesShown
+        applyNativeGuidePolicy()
     }
 
     /**
@@ -113,7 +141,9 @@ internal class CurrentScopeIndentGuideController(
     private fun applyNativeGuidePolicy() {
         if (editor.isDisposed) return
 
-        val shouldHide = settings.enabled && !settings.getState().keepNativeGuides
+        val shouldHide = settings.enabled &&
+            settings.shouldShowInEditor(editor.editorKind) &&
+            !settings.getState().keepNativeGuides
         if (shouldHide) {
             if (savedNativeIndentGuides == null) {
                 savedNativeIndentGuides = editor.settings.isIndentGuidesShown
@@ -143,6 +173,7 @@ internal class CurrentScopeIndentGuideController(
 
     private fun shouldDrawGuide(): Boolean {
         if (disposed || editor.isDisposed) return false
+        if (!settings.shouldShowInEditor(editor.editorKind)) return false
         val state = settings.getState()
         return shouldShowGuide(
             enabled = settings.enabled,
@@ -154,9 +185,20 @@ internal class CurrentScopeIndentGuideController(
 
     override fun caretPositionChanged(event: CaretEvent) {
         if (!settings.enabled) return
+        // Multiple carets still produce one custom guide: the one for the primary
+        // caret. Moving a secondary caret cannot change it.
+        if (event.caret != editor.caretModel.primaryCaret) return
         // The guide depends on the caret line only, so horizontal moves are free.
         if (event.oldPosition.line == event.newPosition.line) return
         scheduleUpdate()
+    }
+
+    override fun caretAdded(event: CaretEvent) {
+        if (settings.enabled) scheduleUpdate()
+    }
+
+    override fun caretRemoved(event: CaretEvent) {
+        if (settings.enabled) scheduleUpdate()
     }
 
     override fun documentChanged(event: DocumentEvent) {
@@ -194,7 +236,7 @@ internal class CurrentScopeIndentGuideController(
             return
         }
 
-        val guide = getCurrentGuide()
+        val guide = getCurrentGuide()?.visibleWithFolds(collapsedFoldRanges())
         if (guide == appliedGuide && (guide == null || rangeHighlighter?.isValid == true)) return
 
         clearHighlight()
@@ -225,7 +267,7 @@ internal class CurrentScopeIndentGuideController(
      * repeated updates that cannot change the answer reuse the previous guide.
      */
     private fun getCurrentGuide(): ScopeGuide? {
-        val caretLine = editor.caretModel.logicalPosition.line
+        val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
         val stamp = editor.document.modificationStamp
         val tabSize = editor.settings.getTabSize(editor.project).coerceAtLeast(1)
         if (hasCachedGuide &&
@@ -252,8 +294,26 @@ internal class CurrentScopeIndentGuideController(
         val chars = document.charsSequence
         val lines = DocumentLineMap(document)
         val brackets = BracketScanner(editor, chars, lines)
-        val caretLine = editor.caretModel.logicalPosition.line
+        val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
         return ScopeDetector(chars, lines, brackets, tabSize, settings.allowedOpeners()).findGuide(caretLine)
+    }
+
+    /**
+     * Collapsed folds never hide the line where their placeholder is painted, but
+     * every following line inside the region is not visible. The guide is hidden
+     * when either end of the scope falls into such a hidden portion.
+     */
+    private fun collapsedFoldRanges(): List<FoldedLineRange> {
+        val document = editor.document
+        return editor.foldingModel.allFoldRegions.mapNotNull { region ->
+            if (!region.isValid || region.isExpanded) {
+                null
+            } else {
+                val start = document.getLineNumber(region.startOffset.coerceIn(0, document.textLength))
+                val end = document.getLineNumber(region.endOffset.coerceIn(0, document.textLength))
+                FoldedLineRange(start, end)
+            }
+        }
     }
 
     private fun clearHighlight() {
@@ -287,12 +347,16 @@ private class ActiveIndentGuideRenderer(
         // leading whitespace, so the rounded arms have room to reach the opener and
         // the closing line. At column 0 there is no leading whitespace, so the guide
         // falls back to the first character of the opener line and is drawn as a
-        // plain vertical line: a one-pixel arm there looks like a stray dot.
+        // plain vertical line: a one-pixel arm there looks like a stray dot. The
+        // stroke width and radius are logical pixels; the editor's Graphics2D already
+        // applies the HiDPI scale, so applying it again here would double the size.
         val chars = editor.document.charsSequence
-        val firstAnchor = lineTextAnchor(editor, chars, anchorLine)
-        val lastAnchor = lineTextAnchor(editor, chars, endLine)
-        val halfLine = editor.lineHeight / 2
+        val firstAnchor = lineTextAnchor(editor, chars, anchorLine) ?: return
+        val lastAnchor = lineTextAnchor(editor, chars, endLine) ?: return
+        val lineHeight = editor.lineHeight
+        if (lineHeight <= 0) return
 
+        val halfLine = lineHeight / 2
         val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine)).x
         val leadingWidth = (firstAnchor.x - lineStartX).coerceAtLeast(0)
         val halfIndentStep = editor.settings.getTabSize(editor.project).coerceAtLeast(2) / 2f *
@@ -324,6 +388,10 @@ private class ActiveIndentGuideRenderer(
                     lastY = lastAnchor.y + halfLine,
                     drawArms = drawArms,
                     cornerRadius = cornerRadius,
+                    hiddenYRanges = softWrapBreakRanges(
+                        guideX = guideX.toFloat(),
+                        wraps = softWrapCrossovers(editor, anchorLine, endLine),
+                    ),
                 ),
             )
         } finally {
@@ -333,10 +401,12 @@ private class ActiveIndentGuideRenderer(
 
     /**
      * Position of the first non-whitespace character of the line. Using the character
-     * offset (instead of the line start) keeps the arm aligned when the text is soft
-     * wrapped and starts on a continuation visual line.
+     * offset (instead of the line start) keeps the arm aligned when the line is soft
+     * wrapped and its text starts on a continuation visual line. The line visibility
+     * is filtered by [visibleWithFolds] before painting; this method only rejects
+     * coordinates that the editor cannot map to the visible content.
      */
-    private fun lineTextAnchor(editor: Editor, chars: CharSequence, line: Int): Point {
+    private fun lineTextAnchor(editor: Editor, chars: CharSequence, line: Int): Point? {
         val document = editor.document
         val lineStart = document.getLineStartOffset(line)
         val lineEnd = document.getLineEndOffset(line)
@@ -345,7 +415,35 @@ private class ActiveIndentGuideRenderer(
         while (offset < lineEnd && (chars[offset] == ' ' || chars[offset] == '\t')) {
             offset++
         }
-        return editor.offsetToXY(offset)
+        val point = editor.offsetToXY(offset)
+        return if (point.x < 0 || point.y < 0) null else point
+    }
+
+    /**
+     * Soft-wrapped continuation lines that start to the left of the guide would have
+     * text behind the vertical stroke. Those visual rows are excluded from the path.
+     */
+    private fun softWrapCrossovers(editor: Editor, anchorLine: Int, endLine: Int): List<SoftWrapCrossover> {
+        val document = editor.document
+        val start = document.getLineStartOffset(anchorLine)
+        val end = document.getLineEndOffset(endLine)
+        if (end <= start) return emptyList()
+
+        val model = editor.softWrapModel
+        if (!model.isSoftWrappingEnabled) return emptyList()
+
+        return model.getSoftWrapsForRange(start, end).mapNotNull { wrap ->
+            if (!model.isVisible(wrap)) {
+                null
+            } else {
+                val visualLine = editor.offsetToVisualLine(wrap.start, false)
+                SoftWrapCrossover(
+                    topY = editor.visualLineToY(visualLine),
+                    lineHeight = editor.lineHeight,
+                    indentPixels = wrap.indentInPixels,
+                )
+            }
+        }
     }
 
     private companion object {
@@ -369,6 +467,7 @@ internal fun createScopePath(
     lastY: Int,
     drawArms: Boolean,
     cornerRadius: Float = DEFAULT_CORNER_RADIUS,
+    hiddenYRanges: List<IntRange> = emptyList(),
 ): Path2D.Float {
     val x = guideX.toFloat()
     val topArmEnd = if (drawArms) maxOf(firstTextX.toFloat(), x) else x
@@ -384,18 +483,71 @@ internal fun createScopePath(
 
     val top = firstY.toFloat()
     val bottom = lastY.toFloat()
+    val segments = visibleVerticalSegments(firstY, lastY, hiddenYRanges)
+    if (segments.isEmpty()) return path
 
-    path.moveTo(topArmEnd, top)
-    path.lineTo(x + radius, top)
-    if (radius > 0f) {
-        path.quadTo(x, top, x, top + radius)
-        path.lineTo(x, bottom - radius)
-        path.quadTo(x, bottom, x + radius, bottom)
-    } else {
-        path.lineTo(x, bottom)
+    segments.forEachIndexed { index, segment ->
+        val isFirst = index == 0
+        val isLast = index == segments.lastIndex
+        val segmentTop = segment.first.toFloat()
+        val segmentBottom = segment.last.toFloat()
+
+        if (isFirst) {
+            path.moveTo(topArmEnd, top)
+            path.lineTo(x + radius, top)
+            if (radius > 0f) {
+                path.quadTo(x, top, x, top + radius)
+                path.lineTo(x, segmentBottom)
+            } else {
+                path.lineTo(x, segmentBottom)
+            }
+        } else {
+            path.moveTo(x, segmentTop)
+            path.lineTo(x, segmentBottom)
+        }
+
+        if (isLast) {
+            if (radius > 0f) {
+                path.lineTo(x, segmentBottom - radius)
+                path.quadTo(x, segmentBottom, x + radius, segmentBottom)
+            } else {
+                path.lineTo(x, segmentBottom)
+            }
+            path.lineTo(bottomArmEnd, segmentBottom)
+        }
     }
-    path.lineTo(bottomArmEnd, bottom)
+
     return path
+}
+
+/**
+ * Splits the vertical part of the guide around the soft-wrapped rows that contain
+ * text to the left of it. The first and last rows are preserved so the rounded arms
+ * are not clipped.
+ */
+private fun visibleVerticalSegments(
+    top: Int,
+    bottom: Int,
+    hiddenYRanges: List<IntRange>,
+): List<IntRange> {
+    if (bottom < top) return emptyList()
+
+    val blocked = hiddenYRanges.mapNotNull { range ->
+        val start = maxOf(range.first, top + 1)
+        val end = minOf(range.last, bottom - 1)
+        if (start <= end) start..end else null
+    }.sortedBy { it.first }
+
+    val result = mutableListOf<IntRange>()
+    var cursor = top
+    for (range in blocked) {
+        if (range.last < cursor) continue
+        if (range.first > bottom) break
+        if (range.first > cursor) result += cursor..(range.first - 1)
+        cursor = maxOf(cursor, range.last + 1)
+    }
+    if (cursor <= bottom) result += cursor..bottom
+    return result
 }
 
 private const val DEFAULT_CORNER_RADIUS = 4f

@@ -18,15 +18,17 @@
         <code>)</code> or <code>]</code>.
         <br><br>
         Native indent guides are hidden only while the custom guide is active, and each
-        editor's original setting is restored when the feature is disabled.
+        editor's original setting is restored when the feature is disabled. The guide also
+        handles collapsed folds, soft-wrapped lines, multiple carets and HiDPI displays.
         <br><br>
         Toggle it with <b>Ctrl+Alt+G</b> (<b>Cmd+Option+G</b> on macOS), from
         <b>View → Appearance → IndentScope Guide</b>, through the status-bar widget, or with the stable
         <code>IndentScope.ToggleGuide</code> action ID for IdeaVim.
         <br><br>
-        Customize scope types, stroke width, corner radius, native-guide behavior and the guide color in
-        <b>Settings → Tools → IndentScope</b>. The color is theme-aware and can also be changed in
-        <b>Settings → Editor → Color Scheme → IndentScope</b>. The interface is available in English and Spanish.
+        Customize scope types, stroke width, corner radius, native-guide behavior, console/diff/preview
+        editors and the guide color in <b>Settings → Tools → IndentScope</b>. The color is theme-aware and
+        can also be changed in <b>Settings → Editor → Color Scheme → IndentScope</b>. The interface is
+        available in English and Spanish.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.

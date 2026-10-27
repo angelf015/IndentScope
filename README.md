@@ -32,8 +32,11 @@ fun main() {
 - Anchors Allman-style declarations to the declaration line instead of the `{` line.
 - Keeps the approved look: accent color, rounded corners, no horizontal arms on body lines.
 - Hides native indent guides only while the custom guide is active.
-- Restores the native indent-guide setting of each editor when disabled.
+- Restores the native indent-guide setting of each editor when disabled, including changes made through the IDE while
+  the plugin is active.
 - Optional unbraced scopes end at their last body line; they never borrow the closing bracket of an outer block.
+- Handles collapsed folds, soft-wrapped lines, multiple carets and HiDPI consistently.
+- Console, diff and preview editors are supported as opt-in surfaces.
 - Settings panel in **Settings → Tools → IndentScope** for behavior and appearance.
 - Theme-aware guide color, also customizable per color scheme.
 - Status-bar widget for a quick on/off toggle.
@@ -91,9 +94,26 @@ Open **Settings → Tools → IndentScope** to customize the plugin:
 | Stroke width | 1.5 px | Guide thickness, from 1.0 to 4.0 px in 0.5 px steps. |
 | Corner radius | 4 px | Rounding of the top and bottom corners, from 0 to 12 px. |
 | Use a custom guide color | Off | Overrides the theme color with a color chosen in the settings panel. |
+| Console editors | Off | Draws the guide in console output editors. |
+| Diff editors | Off | Draws the guide in diff viewers. |
+| Preview editors | Off | Draws the guide in preview editors, such as search results or code-style previews. |
 
 If a scope type is disabled, the guide falls back outward to the nearest enabled enclosing scope instead of
-disappearing. At least one scope type must remain enabled.
+disappearing. At least one scope type must remain enabled. Main editors are always included; auxiliary editor types are
+independent and off by default.
+
+### Visual robustness
+
+- **Collapsed folds:** when the line that opens the scope or its closing line is hidden by a collapsed fold, the guide
+  hides. A fold inside the body keeps the outer guide, and expanding the fold restores it immediately.
+- **Soft wrap:** the vertical stroke skips continuation rows whose text starts to its left, so it does not paint over
+  wrapped content. The first and last rows keep the rounded arms.
+- **Multiple carets:** the primary caret defines the current scope. Adding or removing carets refreshes the guide.
+- **HiDPI:** stroke width and corner radius are logical pixels. The editor already scales its `Graphics2D`, so applying
+  the display scale again would double the size.
+- **Column 0:** when the opener has no leading whitespace, the guide is a clean vertical line without artificial arms.
+- **External setting changes:** if **Show indent guides** changes in the IDE while the plugin is active, the native-guide
+  policy is reapplied and the latest preference is preserved for when the plugin is disabled.
 
 ### Guide color
 
@@ -181,8 +201,11 @@ The platform tests cover the global toggle, native-guide restoration, persistenc
 unbraced scopes that must not borrow an outer block's closing brace, top-level Python scopes, empty and single-line
 blocks, mixed indentation, strings/comments with bracket-like content, backticks, triple quotes, nested comments,
 Allman-style declarations, settings persistence and migration, scope-type filtering with outward fallback, the settings
-panel, the color settings page and the status-bar widget. A separate pure test suite covers the scope detector without
-starting the IDE, and a bundle test checks the English and Spanish resources. The suite currently has **65 tests**.
+panel, the color settings page, the status-bar widget, folded scopes, folds inside the body, multiple carets, auxiliary
+editor filtering, external indent-guide changes and real soft-wrapped editors. A separate pure test suite covers the
+scope detector, fold visibility, editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a
+bundle test checks the English and Spanish resources. The suite currently has **79 tests** (54 platform, 23 pure and
+2 bundle tests).
 
 ## Project structure
 
@@ -191,6 +214,7 @@ src/main/kotlin/
 ├── CurrentScopeIndentGuideFactoryListener.kt  Editor listener, controller and renderer
 ├── BracketScanner.kt                          Language-aware bracket scanner and plain-text fallback
 ├── ScopeDetector.kt                           Pure scope resolution, line map and guide model
+├── GuideRobustness.kt                         Fold, editor-kind and soft-wrap visibility helpers
 ├── IndentScopeService.kt                      Application service: per-editor controllers and refresh
 ├── IndentScopeSettings.kt                     Persisted settings, normalization and legacy migration
 ├── IndentScopeConfigurable.kt                 Settings → Tools → IndentScope panel

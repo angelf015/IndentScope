@@ -6,10 +6,15 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.testFramework.EditorTestUtil
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.awt.image.BufferedImage
 import javax.xml.parsers.DocumentBuilderFactory
 
 class IndentScopeToggleTest : BasePlatformTestCase() {
@@ -995,6 +1000,210 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
             service.editorReleased(second)
             EditorFactory.getInstance().releaseEditor(second)
         }
+    }
+
+    fun testCollapsedScopeHidesGuideUntilExpanded() {
+        val editor = configureBlockEditor()
+        activate(editor)
+        try {
+            val region = foldLines(editor, startLine = 0, endLine = 4)
+            assertFalse("The fold region should be collapsed", region.isExpanded)
+            assertEquals(1, editor.foldingModel.allFoldRegions.size)
+            PlatformTestUtil.waitForAlarm(30)
+
+            assertNull(
+                "A guide whose opening and closing lines are collapsed has no visible extent",
+                customGuide(editor),
+            )
+
+            editor.foldingModel.runBatchFoldingOperation { region.isExpanded = true }
+            PlatformTestUtil.waitForAlarm(30)
+
+            // Expanding restores the caret to the nested block it came from.
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFoldInsideScopeKeepsGuide() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            fun main() {
+                val a = 1
+                if (true) {
+                    doWork()
+                }
+                val b = 2
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(5, 8))
+        activate(editor)
+        try {
+            foldLines(editor, startLine = 2, endLine = 3)
+            PlatformTestUtil.waitForAlarm(30)
+
+            assertGuideSpansLines(editor, startLine = 0, endLine = 6)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testPrimaryCaretDrivesGuideWithMultipleCarets() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            class Example {
+                fun run() {
+                    work()
+                }
+                fun other() {
+                    otherWork()
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+
+            val secondary = editor.caretModel.addCaret(LogicalPosition(5, 8), false)
+            assertNotNull("The fixture editor should support multiple carets", secondary)
+            PlatformTestUtil.waitForAlarm(30)
+
+            assertGuideSpansLines(
+                editor,
+                startLine = 1,
+                endLine = 3,
+            )
+
+            val newPrimary = editor.caretModel.addCaret(LogicalPosition(5, 12), true)
+            assertNotNull(newPrimary)
+            PlatformTestUtil.waitForAlarm(30)
+
+            assertGuideSpansLines(editor, startLine = 4, endLine = 6)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testPreviewEditorIsFilteredByDefaultAndCanBeEnabled() {
+        val document = EditorFactory.getInstance().createDocument(
+            "fun main() {\n    if (true) {\n        doWork()\n    }\n}\n",
+        )
+        val editor = EditorFactory.getInstance()
+            .createEditor(document, project, EditorKind.PREVIEW) as EditorEx
+        editor.settings.isIndentGuidesShown = true
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        service.editorReleased(editor)
+
+        try {
+            updateSettings {
+                showBraceScopes = true
+                showInPreviewEditors = false
+            }
+            service.editorCreated(editor)
+
+            assertNull(
+                "Preview editors are ignored unless explicitly enabled",
+                customGuide(editor),
+            )
+            assertTrue("Native guides must not be hidden in ignored editors", editor.settings.isIndentGuidesShown)
+
+            updateSettings { showInPreviewEditors = true }
+
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+            assertFalse("The enabled preview editor follows the native-guide policy", editor.settings.isIndentGuidesShown)
+        } finally {
+            service.editorReleased(editor)
+            EditorFactory.getInstance().releaseEditor(editor)
+        }
+    }
+
+    fun testExternalShowIndentGuidesChangeReappliesPolicy() {
+        val editor = configureBlockEditor()
+        val externalSettings = EditorSettingsExternalizable.getInstance()
+        val originalExternalValue = externalSettings.isIndentGuidesShown
+        activate(editor)
+        try {
+            assertFalse(editor.settings.isIndentGuidesShown)
+
+            externalSettings.isIndentGuidesShown = true
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+
+            assertFalse(
+                "The plugin's native-guide policy must survive an external Show indent guides change",
+                editor.settings.isIndentGuidesShown,
+            )
+
+            service.enabled = false
+            assertTrue(
+                "Disabling the plugin restores the user's latest external preference",
+                editor.settings.isIndentGuidesShown,
+            )
+        } finally {
+            externalSettings.isIndentGuidesShown = originalExternalValue
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testSoftWrappedScopeStillPaints() {
+        myFixture.configureByText(
+            "Example.txt",
+            "class Example {\n" +
+                "    fun main() {\n" +
+                "        val text = \"a very long line that should wrap inside the test editor\"\n" +
+                "        doWork()\n" +
+                "    }\n" +
+                "}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(3, 8))
+        activate(editor)
+        try {
+            assertTrue(
+                "The test editor should actually soft-wrap the long line",
+                EditorTestUtil.configureSoftWraps(editor, 20),
+            )
+            assertFalse(
+                "Line 2 should be split into several visual lines",
+                editor.softWrapModel.getSoftWrapsForLine(2).isEmpty(),
+            )
+            PlatformTestUtil.waitForAlarm(30)
+            assertGuideSpansLines(editor, startLine = 1, endLine = 4)
+
+            val highlighter = customGuide(editor)
+            assertNotNull(highlighter)
+            val image = BufferedImage(180, 300, BufferedImage.TYPE_INT_ARGB)
+            val graphics = image.createGraphics()
+            try {
+                highlighter!!.customRenderer?.paint(editor, highlighter, graphics)
+            } finally {
+                graphics.dispose()
+            }
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    private fun foldLines(editor: EditorEx, startLine: Int, endLine: Int): com.intellij.openapi.editor.FoldRegion {
+        val document = editor.document
+        var region: com.intellij.openapi.editor.FoldRegion? = null
+        editor.foldingModel.runBatchFoldingOperation {
+            region = editor.foldingModel.addFoldRegion(
+                document.getLineStartOffset(startLine),
+                document.getLineEndOffset(endLine),
+                "...",
+            )
+            region?.isExpanded = false
+        }
+        assertNotNull("The editor should create the fold region", region)
+        return region!!
     }
 
     private fun configureBlockEditor(): EditorEx {

@@ -7,6 +7,8 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
+import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
+import java.beans.PropertyChangeListener
 
 /**
  * Application-level owner of the current-scope guide state. It keeps one controller
@@ -30,6 +32,20 @@ class IndentScopeService : Disposable {
                 }
             },
         )
+
+        // The IDE's "Show indent guides" option can change while the plugin is
+        // active. React after the platform has refreshed every editor's local
+        // setting, so the plugin's native-guide policy is never left in a stale state.
+        EditorSettingsExternalizable.getInstance().addPropertyChangeListener(
+            PropertyChangeListener { event ->
+                if (event.propertyName ==
+                    EditorSettingsExternalizable.PropNames.PROP_IS_INDENT_GUIDES_SHOWN
+                ) {
+                    onExternalIndentGuidesChanged()
+                }
+            },
+            this,
+        )
     }
 
     /**
@@ -47,6 +63,7 @@ class IndentScopeService : Disposable {
 
     fun editorCreated(editor: EditorEx) {
         if (disposed || controllers.containsKey(editor)) return
+        if (!settings.shouldShowInEditor(editor.editorKind)) return
 
         val controller = CurrentScopeIndentGuideController(editor)
         controllers[editor] = controller
@@ -90,8 +107,30 @@ class IndentScopeService : Disposable {
 
     private fun onSettingsChanged() {
         if (disposed) return
+
+        // Editor-type filters can change while editors of that kind are already
+        // open. Dispose the controllers that are no longer wanted so they also
+        // restore the native indent guides, then register the newly enabled ones.
+        val disabled = controllers.filterKeys { !settings.shouldShowInEditor(it.editorKind) }
+        disabled.forEach { (editor, controller) ->
+            controllers.remove(editor)
+            controller.dispose()
+        }
+
         registerOpenEditors()
         controllers.values.toList().forEach { it.onSettingsChanged() }
+    }
+
+    private fun onExternalIndentGuidesChanged() {
+        if (disposed) return
+        ApplicationManager.getApplication().invokeLater(
+            {
+                if (!disposed) {
+                    controllers.values.toList().forEach { it.onExternalIndentGuidesChanged() }
+                }
+            },
+            ModalityState.nonModal(),
+        )
     }
 
     override fun dispose() {

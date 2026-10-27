@@ -1,11 +1,13 @@
 package com.access
 
+import com.intellij.openapi.editor.EditorKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.awt.geom.PathIterator
 import javax.swing.JPanel
 
 class ScopeDetectorTest {
@@ -191,6 +193,113 @@ class ScopeDetectorTest {
         assertFalse("Disabled guide is never visible", shouldShowGuide(false, false, child, editor))
         assertFalse("Without focus no active editor exists", shouldShowGuide(true, true, null, editor))
         assertTrue("A focused child belongs to the editor", shouldShowGuide(true, true, child, editor))
+    }
+
+    @Test
+    fun foldedBodyKeepsGuide() {
+        val guide = ScopeGuide(anchorLine = 0, endLine = 8)
+
+        assertEquals(
+            guide,
+            guide.visibleWithFolds(listOf(FoldedLineRange(startLine = 2, endLine = 4))),
+        )
+    }
+
+    @Test
+    fun foldedOpenerHidesGuide() {
+        val guide = ScopeGuide(anchorLine = 2, endLine = 8)
+
+        assertNull(guide.visibleWithFolds(listOf(FoldedLineRange(startLine = 0, endLine = 3))))
+    }
+
+    @Test
+    fun foldedClosingLineHidesGuide() {
+        val guide = ScopeGuide(anchorLine = 0, endLine = 8)
+
+        assertNull(guide.visibleWithFolds(listOf(FoldedLineRange(startLine = 6, endLine = 9))))
+    }
+
+    @Test
+    fun foldStartingOnClosingLineKeepsGuide() {
+        val guide = ScopeGuide(anchorLine = 0, endLine = 8)
+
+        assertEquals(
+            "The placeholder line remains visible, so the closing line still has an anchor",
+            guide,
+            guide.visibleWithFolds(listOf(FoldedLineRange(startLine = 8, endLine = 12))),
+        )
+    }
+
+    @Test
+    fun auxiliaryEditorsAreOptIn() {
+        assertTrue(isEditorKindEnabled(EditorKind.MAIN_EDITOR, false, false, false))
+        assertTrue(isEditorKindEnabled(EditorKind.UNTYPED, false, false, false))
+        assertFalse(isEditorKindEnabled(EditorKind.CONSOLE, false, false, false))
+        assertFalse(isEditorKindEnabled(EditorKind.DIFF, false, false, false))
+        assertFalse(isEditorKindEnabled(EditorKind.PREVIEW, false, false, false))
+
+        assertTrue(isEditorKindEnabled(EditorKind.CONSOLE, true, false, false))
+        assertTrue(isEditorKindEnabled(EditorKind.DIFF, false, true, false))
+        assertTrue(isEditorKindEnabled(EditorKind.PREVIEW, false, false, true))
+    }
+
+    @Test
+    fun softWrapCrossoverOnlyCoversRowsLeftOfGuide() {
+        val ranges = softWrapBreakRanges(
+            guideX = 20f,
+            wraps = listOf(
+                SoftWrapCrossover(topY = 100, lineHeight = 16, indentPixels = 8),
+                SoftWrapCrossover(topY = 116, lineHeight = 16, indentPixels = 20),
+                SoftWrapCrossover(topY = 132, lineHeight = 16, indentPixels = 4),
+            ),
+        )
+
+        assertEquals(listOf(100 until 116, 132 until 148), ranges)
+    }
+
+    @Test
+    fun scopePathSplitsAroundSoftWrapRows() {
+        val path = createScopePath(
+            guideX = 20,
+            firstTextX = 24,
+            firstY = 10,
+            lastTextX = 24,
+            lastY = 100,
+            drawArms = true,
+            hiddenYRanges = listOf(40..55),
+        )
+
+        assertEquals("The path should have a gap for the wrapped text", 2, moveToCount(path))
+        assertEquals("The arms must stay at the scope boundaries", 10.0, path.bounds2D.minY, 0.001)
+        assertEquals(100.0, path.bounds2D.maxY, 0.001)
+    }
+
+    @Test
+    fun scopePathKeepsArmsWhenBreakTouchesBoundary() {
+        val path = createScopePath(
+            guideX = 20,
+            firstTextX = 24,
+            firstY = 10,
+            lastTextX = 24,
+            lastY = 100,
+            drawArms = true,
+            hiddenYRanges = listOf(0..10, 100..120),
+        )
+
+        assertEquals(1, moveToCount(path))
+        assertEquals(10.0, path.bounds2D.minY, 0.001)
+        assertEquals(100.0, path.bounds2D.maxY, 0.001)
+    }
+
+    private fun moveToCount(path: java.awt.geom.Path2D): Int {
+        val iterator = path.getPathIterator(null)
+        val coordinates = DoubleArray(6)
+        var count = 0
+        while (!iterator.isDone) {
+            if (iterator.currentSegment(coordinates) == PathIterator.SEG_MOVETO) count++
+            iterator.next()
+        }
+        return count
     }
 
     private fun detect(
