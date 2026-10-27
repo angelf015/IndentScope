@@ -341,6 +341,428 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
+    fun testJavaScopeIgnoresBracesInStringsAndComments() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            class Example {
+                String opener = "{";
+                // } a line comment
+                void run() {
+                    String closer = "}";
+                    /* } a block comment */
+                    int value = 1;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(6, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 3, endLine = 7)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testKotlinScopeIgnoresBracesInTripleQuotedString() {
+        myFixture.configureByText(
+            "Example.kt",
+            "fun main() {\n" +
+                "    val text = \"\"\"\n" +
+                "        }\n" +
+                "    \"\"\".trimIndent()\n" +
+                "    println(text)\n" +
+                "}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(4, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testKotlinScopeIgnoresBracesInNestedComments() {
+        myFixture.configureByText(
+            "Example.kt",
+            """
+            fun main() {
+                /* outer
+                   /* inner } */
+                   still comment
+                */
+                println("done")
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(5, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 6)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFallbackIgnoresBracesInStringsAndComments() {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            fun main() {
+                val text = "}"
+                // } a line comment
+                val other = '{'
+                doWork()
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(4, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFallbackIgnoresBracesInBacktickStrings() {
+        myFixture.configureByText(
+            "Example.js",
+            """
+            function main() {
+              const text = `
+                }
+              `;
+              console.log(text);
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(4, 2))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFallbackIgnoresBlockCommentOnOpenerLine() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() { /* } */\n    doWork()\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 2)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFallbackIgnoresBacktickOnOpenerLine() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() { val text = `}`\n    doWork()\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 2)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testAllmanMethodGuideStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            public class Example
+            {
+                void run()
+                {
+                    int value = 1;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(4, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 2, endLine = 5)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testAllmanClassGuideStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            public class Example
+            {
+                private String name;
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testAllmanMultilineSignatureStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            public class Example
+            {
+                void run(
+                    int value
+                )
+                {
+                    int result = value;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(6, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 2, endLine = 7)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testFallbackAllmanGuideStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main()\n{\n    doWork()\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testKotlinAllmanFunctionGuideStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.kt",
+            "fun main()\n{\n    println(\"hi\")\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testTopLevelPythonDefShowsGuide() {
+        myFixture.configureByText(
+            "Example.py",
+            "def greet():\n    print(\"hi\")\n    return 1\n\ngreet()\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 2)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testSingleLineBlockHasNoGuide() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() { println(\"hi\") }\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(0, 8))
+        activate(editor)
+        try {
+            assertNull(
+                "A block that opens and closes on the same line has no vertical guide",
+                customGuide(editor),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testMultilineEmptyBlockShowsGuide() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(0, 4))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 1)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testBlockWithBlankBodyShowsGuide() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\n\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(1, 0))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 0, endLine = 2)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testMixedIndentationScope() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\n    if (true) {\n\t    doWork()\n\t}\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 5))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testTabIndentationIsMeasuredInVisualColumns() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\n\tif (true) {\n\t\tdoWork()\n\t}\n}\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 2))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testCrLfDocumentDoesNotBreakScopeDetection() {
+        myFixture.configureByText(
+            "Example.txt",
+            "fun main() {\r\n    if (true) {\r\n        doWork()\r\n    }\r\n}\r\n",
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 8))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testTextScannerIgnoresVerbatimStringBraces() {
+        val document = EditorFactory.getInstance().createDocument(
+            "class C\n{\n    string value = @\"}\";\n}\n",
+        )
+        val chars = document.charsSequence
+        val scanner = TextBracketScanner(
+            TextLineMap(chars),
+            chars,
+            TextSyntax.forFileName("Example.cs"),
+        )
+        val opener = scanner.lastUnmatchedOpenerOnLine(1)
+        assertNotNull("Class brace should be found", opener)
+        assertEquals('{', opener!!.char)
+        assertEquals(
+            "A brace inside a C# verbatim string must not close the class",
+            document.getLineStartOffset(3),
+            scanner.matchingCloser(opener),
+        )
+    }
+
+    fun testTextScannerIgnoresNestedBlockCommentBraces() {
+        val document = EditorFactory.getInstance().createDocument(
+            "fun main() {\n    /* outer\n       /* inner } */\n       still comment\n    */\n}\n",
+        )
+        val chars = document.charsSequence
+        val scanner = TextBracketScanner(
+            TextLineMap(chars),
+            chars,
+            TextSyntax.forFileName("Example.kt"),
+        )
+        val opener = scanner.lastUnmatchedOpenerOnLine(0)
+        assertNotNull("Function brace should be found", opener)
+        assertEquals(
+            "A brace inside a nested block comment must not close the function",
+            document.getLineStartOffset(5),
+            scanner.matchingCloser(opener!!),
+        )
+    }
+
+    fun testTextScannerIgnoresBraceOnLineInsideMultilineString() {
+        val document = EditorFactory.getInstance().createDocument(
+            "fun main() {\n    val text = \"\"\"\n    {\n        content\n    }\n    \"\"\"\n}\n",
+        )
+        val chars = document.charsSequence
+        val scanner = TextBracketScanner(
+            TextLineMap(chars),
+            chars,
+            TextSyntax.forFileName("Example.kt"),
+        )
+        assertNull(
+            "A brace inside a triple-quoted string is not an opener for that line",
+            scanner.lastUnmatchedOpenerOnLine(2),
+        )
+    }
+
+    fun testTextScannerHandlesKotlinRawStringWithBackslashBeforeDelimiter() {
+        val document = EditorFactory.getInstance().createDocument(
+            "fun main() {\n    val text = \"\"\"value\\\"\"\"\n    doWork()\n}\n",
+        )
+        val chars = document.charsSequence
+        val scanner = TextBracketScanner(
+            TextLineMap(chars),
+            chars,
+            TextSyntax.forFileName("Example.kt"),
+        )
+        val opener = scanner.lastUnmatchedOpenerOnLine(0)
+        assertNotNull("Function brace should be found", opener)
+        assertEquals(
+            "A backslash inside a Kotlin raw string must not escape the closing delimiter",
+            document.getLineStartOffset(3),
+            scanner.matchingCloser(opener!!),
+        )
+    }
+
     fun testRegisterOpenEditorsCoversExistingEditors() {
         val editor = configureBlockEditor()
         service.editorReleased(editor)
@@ -417,6 +839,22 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         editor.markupModel.allHighlighters.firstOrNull {
             it.customRenderer?.javaClass?.name == "com.access.ActiveIndentGuideRenderer"
         }
+
+    private fun assertGuideSpansLines(editor: EditorEx, startLine: Int, endLine: Int) {
+        val guide = customGuide(editor)
+        assertNotNull("Custom guide should be visible", guide)
+        val document = editor.document
+        assertEquals(
+            "Guide should start on line $startLine",
+            document.getLineStartOffset(startLine),
+            guide!!.startOffset,
+        )
+        assertEquals(
+            "Guide should end on line $endLine",
+            document.getLineEndOffset(endLine),
+            guide.endOffset,
+        )
+    }
 
     private fun hasCustomGuide(editor: EditorEx): Boolean = customGuide(editor) != null
 

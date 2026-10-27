@@ -9,6 +9,8 @@
 - The plugin now declares `require-restart="true"`, so installation, update, and uninstallation require an IDE
   restart. This guarantees the guide is active immediately after a first install instead of waiting for the next
   manual restart.
+- Scope detection now uses the language brace matcher when available and falls back to a text scanner for plain
+  files and unsupported editors.
 
 ### Fixed
 
@@ -18,6 +20,11 @@
   drawn at the first character of the class declaration because there is no indentation space to its left.
 - The column-0 guide shown for top-level DTOs no longer draws the tiny one-pixel end arms, which looked like stray
   dots. It is now a clean vertical line.
+- Brackets inside strings, comments, backtick template literals, triple-quoted/raw strings and C# verbatim strings no
+  longer end the current scope early.
+- Allman-style declarations now start the guide at the declaration line instead of the `{` line.
+- Top-level unbraced scopes, such as Python `def` and `class` blocks, now show their guide.
+- Multi-line empty blocks now show their guide; blocks that open and close on the same line intentionally show none.
 
 ## [1.2.1] - 2026-10-26
 

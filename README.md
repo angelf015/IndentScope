@@ -26,6 +26,10 @@ fun main() {
 - Supports scopes closed by `}`, `)` and `]`.
 - Shows the class-level guide for DTOs and other classes without methods.
 - Works with nested blocks and multi-line calls/conditions.
+- Shows top-level unbraced scopes, such as Python `def` and `class` blocks.
+- Shows multi-line empty blocks; single-line blocks intentionally draw no vertical guide.
+- Ignores brackets inside strings, comments, template literals and raw strings.
+- Anchors Allman-style declarations to the declaration line instead of the `{` line.
 - Keeps the approved look: accent color, rounded corners, no horizontal arms on body lines.
 - Hides native indent guides only while the custom guide is active.
 - Restores the native indent-guide setting of each editor when disabled.
@@ -132,13 +136,17 @@ To check binary compatibility against the supported IDEs:
 ```
 
 The platform tests cover the global toggle, native-guide restoration, persistence, multi-line parentheses and brackets,
-and unbraced scopes that must not borrow an outer block's closing brace.
+unbraced scopes that must not borrow an outer block's closing brace, top-level Python scopes, empty and single-line
+blocks, mixed indentation, strings/comments with bracket-like content, backticks, triple quotes, nested comments and
+Allman-style declarations. A separate pure test suite covers the scope detector without starting the IDE.
 
 ## Project structure
 
 ```
 src/main/kotlin/
-├── CurrentScopeIndentGuideFactoryListener.kt  Editor listener, controller, scope detection and renderer
+├── CurrentScopeIndentGuideFactoryListener.kt  Editor listener, controller and renderer
+├── BracketScanner.kt                          Language-aware bracket scanner and plain-text fallback
+├── ScopeDetector.kt                           Pure scope resolution, line map and guide model
 ├── IndentScopeService.kt                      Application service: per-editor state and persistence
 └── ToggleIndentScopeGuideAction.kt            Global Show/Hide action
 
@@ -147,7 +155,8 @@ src/main/resources/META-INF/
 └── pluginIcon.svg                             Plugin icon
 
 src/test/kotlin/com/access/
-└── IndentScopeToggleTest.kt                   Platform regression tests
+├── IndentScopeToggleTest.kt                   Platform regression tests
+└── ScopeDetectorTest.kt                       Pure detector tests without BasePlatformTestCase
 ```
 
 ## Contributing
