@@ -1,5 +1,7 @@
 # IndentScope
 
+**English** · [Español](README.es.md)
+
 [![Build](https://github.com/angelf015/IndentScope/actions/workflows/build.yml/badge.svg)](https://github.com/angelf015/IndentScope/actions/workflows/build.yml)
 [![JetBrains Marketplace](https://img.shields.io/jetbrains/plugin/v/35438-indentscope.svg)](https://plugins.jetbrains.com/plugin/35438-indentscope)
 [![Downloads](https://img.shields.io/jetbrains/plugin/d/35438-indentscope.svg)](https://plugins.jetbrains.com/plugin/35438-indentscope)
@@ -19,6 +21,33 @@ fun main() {
     )                      // guide ends here
 }
 ```
+
+## Demo
+
+![IndentScope demo: the rounded guide follows the caret through nested scopes](docs/images/demo.gif)
+
+The demo moves the caret through the scopes of a `TicketResponse create(...)` method. The rounded guide follows the
+innermost enabled scope that contains the caret, and native indent guides stay hidden while the custom guide is active.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/method-scope.png" alt="Rounded guide around a method body" width="700">
+  <br>
+  <em>Method scope: the guide runs from the declaration to the closing brace.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/nested-scopes.png" alt="Rounded guide around a method with nested while, if and else blocks" width="700">
+  <br>
+  <em>Nested blocks: the selected scope keeps its guide while inner blocks retain their indentation.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/lambda-scope.png" alt="Rounded guide around a multi-line lambda inside a buildList call" width="666">
+  <br>
+  <em>Multi-line lambda: the guide follows a lambda argument inside a <code>buildList</code> call.</em>
+</p>
 
 ## Features
 
@@ -54,10 +83,11 @@ From the IDE:
 
 You can also open the [Marketplace page](https://plugins.jetbrains.com/plugin/35438-indentscope) directly.
 
-From a downloaded release:
+From a downloaded ZIP:
 
 1. Download `IndentScope-1.3.0.zip` from the
-   [releases page](https://github.com/angelf015/IndentScope/releases).
+   [Marketplace versions page](https://plugins.jetbrains.com/plugin/35438-indentscope/versions) or from the
+   [GitHub releases page](https://github.com/angelf015/IndentScope/releases) once a release is published.
 2. Open **Settings → Plugins**, click the gear icon → **Install Plugin from Disk...**, and select the ZIP.
 3. Restart the IDE when prompted. The restart is required for the plugin to activate.
 
@@ -135,7 +165,7 @@ The resolution order is:
 ## Localization
 
 The plugin ships with an English base bundle and a Spanish translation. All user-visible strings follow the IDE
-language automatically.
+language automatically. The full Spanish documentation is in [README.es.md](README.es.md).
 
 ## IdeaVim
 
@@ -163,8 +193,22 @@ Useful commands while configuring:
 ## Requirements
 
 - IntelliJ Platform 2025.2+ (build 252+), including 2025.3 and 2026.x.
-- Verified with IntelliJ IDEA 2025.2.6.3, 2025.3.6.1, 2026.1.5 and 2026.2.3.
+- Verified with IntelliJ IDEA 2025.2.6.3, 2025.3.6.1, 2026.1.5, 2026.2.3 and Android Studio 2026.2.1.8.
 - The plugin does not depend on a specific language plugin.
+
+## Known limitations
+
+- IndentScope draws one guide at a time: the innermost enabled scope that contains the primary caret. Parent scopes are
+  not drawn simultaneously, and additional carets do not produce additional guides.
+- Scopes that start at column 0 are opt-in. Enable **Show the guide for scopes that start at column 0** when top-level
+  declarations should show a guide.
+- A scope that opens and closes on the same line intentionally draws no vertical guide.
+- Settings are application-wide; per-project overrides are not available yet.
+- Scope detection uses the language's brace matcher when available. For plain text and languages without a matcher, a
+  lexical fallback covers common string and comment syntaxes, but exotic syntaxes may not be recognized.
+- Console, diff and preview editors are opt-in and disabled by default.
+- The plugin declares `require-restart="true"`, so installing, updating or uninstalling it requires an IDE restart.
+- Very large generated files may exceed the scan safety limits and skip a guide.
 
 ## Build
 
@@ -271,10 +315,17 @@ src/main/kotlin/
 src/main/resources/
 ├── META-INF/
 │   ├── plugin.xml                             Plugin registration
-│   └── pluginIcon.svg                         Plugin icon
+│   ├── pluginIcon.svg                         Plugin icon (light theme)
+│   └── pluginIcon_dark.svg                    Plugin icon (dark theme)
 └── messages/
     ├── IndentScopeBundle.properties           English strings
     └── IndentScopeBundle_es.properties        Spanish strings
+
+docs/images/
+├── demo.gif                                   Animated demo used by both READMEs
+├── method-scope.png                           Method-level guide
+├── nested-scopes.png                          Nested blocks
+└── lambda-scope.png                           Multi-line lambda
 
 src/test/kotlin/com/access/
 ├── IndentScopeToggleTest.kt                   Platform and integration regression tests
@@ -282,6 +333,17 @@ src/test/kotlin/com/access/
 ├── ScopePerformanceTest.kt                    Index-reuse and large-file tests
 └── IndentScopeBundleTest.kt                   English/Spanish resource tests
 ```
+
+## Support and links
+
+- **Marketplace:** [IndentScope](https://plugins.jetbrains.com/plugin/35438-indentscope)
+- **Documentation:** this README and [README.es.md](README.es.md)
+- **Bug reports and feature requests:** [GitHub Issues](https://github.com/angelf015/IndentScope/issues)
+- **Releases:** [GitHub Releases](https://github.com/angelf015/IndentScope/releases)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+
+Questions are welcome in the issue tracker as well as bug reports. A dedicated forum will be linked here when GitHub
+Discussions is enabled.
 
 ## Contributing
 

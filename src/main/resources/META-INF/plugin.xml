@@ -1,5 +1,5 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
-<idea-plugin require-restart="true">
+<idea-plugin url="https://github.com/angelf015/IndentScope" require-restart="true">
     <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
     <id>com.access.IndentScope</id>
 
@@ -29,6 +29,19 @@
         editors and the guide color in <b>Settings → Tools → IndentScope</b>. The color is theme-aware and
         can also be changed in <b>Settings → Editor → Color Scheme → IndentScope</b>. The interface is
         available in English and Spanish.
+        <br><br>
+        <b>Español:</b> resalta con un corchete redondeado la guía de indentación del ámbito actual,
+        desde la línea que lo abre hasta su cierre <code>}</code>, <code>)</code> o <code>]</code>.
+        Oculta las guías nativas solo mientras la guía está activa y las restaura al desactivarla.
+        También responde a pliegues contraídos, líneas ajustadas, varios cursores y pantallas HiDPI.
+        Configura los tipos de ámbito, el grosor, el radio, los editores auxiliares y el color en
+        <b>Ajustes → Herramientas → IndentScope</b>. Interfaz disponible en inglés y español.
+        <br><br>
+        <b>Documentation:</b>
+        <a href="https://github.com/angelf015/IndentScope#readme">English</a> ·
+        <a href="https://github.com/angelf015/IndentScope/blob/main/README.es.md">Español</a>.
+        <b>Issues:</b>
+        <a href="https://github.com/angelf015/IndentScope/issues">GitHub</a>.
         ]]></description>
 
     <!-- Product and plugin compatibility requirements.

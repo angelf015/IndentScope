@@ -12,6 +12,10 @@
   IndentScope**.
 - CI matrix on Ubuntu, macOS and Windows, Gradle wrapper validation, ktlint and Kover coverage reports.
 - Compatibility verification against IntelliJ IDEA 2025.3.6.1, 2026.1.5 and Android Studio 2026.2.1.8.
+- Demo GIF and screenshots in the README, plus a full Spanish README (`README.es.md`).
+- Separate light and dark plugin icons (`pluginIcon.svg` and `pluginIcon_dark.svg`).
+- Bilingual plugin description with documentation and issue-tracker links.
+- Known limitations, support links and a per-version Marketplace checklist.
 
 ### Changed
 
