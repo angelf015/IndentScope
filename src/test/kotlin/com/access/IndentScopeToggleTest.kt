@@ -11,8 +11,22 @@ import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import javax.xml.parsers.DocumentBuilderFactory
 
 class IndentScopeToggleTest : BasePlatformTestCase() {
+
+    fun testPluginDescriptorRequiresRestart() {
+        val descriptor = javaClass.getResourceAsStream("/META-INF/plugin.xml")
+        assertNotNull("Plugin descriptor should be available in tests", descriptor)
+        val document = descriptor!!.use {
+            DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(it)
+        }
+        assertEquals(
+            "The plugin must require a restart so it activates right after installation",
+            "true",
+            document.documentElement.getAttribute("require-restart"),
+        )
+    }
 
     private val service: IndentScopeService
         get() = ApplicationManager.getApplication().getService(IndentScopeService::class.java)

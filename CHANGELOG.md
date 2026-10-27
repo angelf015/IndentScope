@@ -2,7 +2,13 @@
 
 # IndentScope Changelog
 
-## [Unreleased]
+## [1.2.2] - 2026-10-26
+
+### Changed
+
+- The plugin now declares `require-restart="true"`, so installation, update, and uninstallation require an IDE
+  restart. This guarantees the guide is active immediately after a first install instead of waiting for the next
+  manual restart.
 
 ### Fixed
 

@@ -37,16 +37,16 @@ From the IDE:
 
 1. Open **Settings → Plugins → Marketplace**.
 2. Search for **IndentScope** and click **Install**.
-3. Restart the IDE if it asks to.
+3. Restart the IDE when prompted. The restart is required for the plugin to activate.
 
 You can also open the [Marketplace page](https://plugins.jetbrains.com/plugin/35438-indentscope) directly.
 
 From a downloaded release:
 
-1. Download `IndentScope-1.2.1.zip` from the
+1. Download `IndentScope-1.2.2.zip` from the
    [releases page](https://github.com/angelf015/IndentScope/releases).
 2. Open **Settings → Plugins**, click the gear icon → **Install Plugin from Disk...**, and select the ZIP.
-3. Restart the IDE if it asks to.
+3. Restart the IDE when prompted. The restart is required for the plugin to activate.
 
 ## Toggle the guide
 
@@ -105,13 +105,13 @@ Requirements: JDK 21. The Gradle wrapper downloads the rest.
 The installable ZIP is generated at:
 
 ```
-build/distributions/IndentScope-1.2.1.zip
+build/distributions/IndentScope-1.2.2.zip
 ```
 
 Install it from **Settings → Plugins → Install Plugin from Disk**.
 
-If the IDE offers to restart after installing or updating the plugin, restart it. Current versions also register editors
-that were already open when the plugin was loaded dynamically, but a restart guarantees a clean state.
+IndentScope declares `require-restart="true"`, so the IDE always asks for a restart after installing, updating, or
+uninstalling it. Restart when prompted: the guide is active immediately afterwards.
 
 To run a sandbox IDE with the plugin installed:
 
