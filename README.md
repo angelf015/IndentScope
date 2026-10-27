@@ -24,6 +24,7 @@ fun main() {
 
 - Rounded indent guide for the scope containing the caret.
 - Supports scopes closed by `}`, `)` and `]`.
+- Shows the class-level guide for DTOs and other classes without methods.
 - Works with nested blocks and multi-line calls/conditions.
 - Keeps the approved look: accent color, rounded corners, no horizontal arms on body lines.
 - Hides native indent guides only while the custom guide is active.

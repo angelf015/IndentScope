@@ -178,7 +178,7 @@ internal class CurrentScopeIndentGuideController(
         val caretLine = editor.caretModel.logicalPosition.line.coerceIn(0, lineCount - 1)
         val baseLine = findNearestNonBlankLine(chars, caretLine, lineCount, tabSize) ?: return null
         val baseIndent = leadingIndentOrBlank(chars, baseLine, tabSize)
-        if (baseIndent <= 0) return null
+        if (baseIndent < 0) return null
 
         // The guide belongs to the innermost block containing the caret. That block is
         // opened either by the base line itself (e.g. when the caret is on the `if`
@@ -189,9 +189,15 @@ internal class CurrentScopeIndentGuideController(
             findScopeOpenerLine(chars, baseLine, baseIndent, lineCount, tabSize) ?: return null
         val openerLine = adjustOpenerLine(chars, detectedOpenerLine)
         val indentColumn = leadingIndentOrBlank(chars, openerLine, tabSize)
-        if (indentColumn <= 0) return null
+        if (indentColumn < 0) return null
 
         val scope = resolveScope(chars, openerLine)
+        // A top-level class/function has no indentation to its left, but it is still a
+        // real bracket scope. Draw its guide at the first character instead. Do not
+        // create guides for indentation-only top-level statements, which have no
+        // closing bracket of their own.
+        if (indentColumn == 0 && scope == null) return null
+
         val knownEndLine = scope?.endLine
         if (knownEndLine != null) {
             // Multi-line parentheses/brackets know their closing line exactly.
@@ -656,7 +662,8 @@ private class ActiveIndentGuideRenderer(
         // bracket (a `}`, `)` or `]` line), so it covers the whole block. The vertical
         // is placed half an indent step to the left of the opener text, inside its
         // leading whitespace, so the rounded arms have room to reach the opener and
-        // the closing line.
+        // the closing line. At column 0 there is no leading whitespace, so the guide
+        // falls back to the first character of the opener line.
         val chars = editor.document.charsSequence
         val firstAnchor = lineTextAnchor(editor, chars, anchorLine)
         val lastAnchor = lineTextAnchor(editor, chars, endLine)

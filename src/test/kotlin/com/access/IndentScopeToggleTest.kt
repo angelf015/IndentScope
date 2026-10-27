@@ -206,6 +206,39 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
+    fun testTopLevelClassGuideCoversFields() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            @Data
+            public class Example {
+                private String first;
+                private String second;
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(3, 8))
+        activate(editor)
+        try {
+            val guide = customGuide(editor)
+            assertNotNull("A DTO with only fields should still show the class guide", guide)
+            val document = editor.document
+            assertEquals(
+                "Guide should start at the class declaration, below the annotation",
+                document.getLineStartOffset(1),
+                guide!!.startOffset,
+            )
+            assertEquals(
+                "Guide should end at the class's closing brace",
+                document.getLineEndOffset(4),
+                guide.endOffset,
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
     fun testGuideExtendsToClosingBracket() {
         myFixture.configureByText(
             "Example.txt",

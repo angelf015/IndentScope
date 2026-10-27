@@ -8,6 +8,8 @@
 
 - The guide now reaches the closing `}` of a method or constructor whose declaration spans multiple lines, instead of
   stopping at the last body line.
+- Classes without methods, such as Lombok DTOs, now show their class-level guide. For a top-level class the guide is
+  drawn at the first character of the class declaration because there is no indentation space to its left.
 
 ## [1.2.1] - 2026-10-26
 
