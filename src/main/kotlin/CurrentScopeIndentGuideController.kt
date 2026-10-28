@@ -12,6 +12,7 @@ import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.Alarm
 import java.awt.Component
@@ -49,22 +50,28 @@ internal class CurrentScopeIndentGuideController(
     private val listenerDisposable: Disposable = Disposer.newDisposable()
     private val updateAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, listenerDisposable)
     private val updateRequest = Runnable { updateHighlight() }
+    private val animationAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, listenerDisposable)
+    private val animationTick = Runnable { tickAnimation() }
     private val settings: IndentScopeSettings
         get() = IndentScopeSettings.getInstance()
+    private val project: Project?
+        get() = editor.project
     private val focusListener = object : FocusAdapter() {
         override fun focusGained(e: FocusEvent) = onFocusChanged()
 
         override fun focusLost(e: FocusEvent) = onFocusChanged()
     }
 
-    private var rangeHighlighter: RangeHighlighter? = null
-    private var appliedGuide: ScopeGuide? = null
-    private var cachedGuide: ScopeGuide? = null
+    private var paintedGuides: List<PaintedGuide> = emptyList()
+    private var fadingGuides: List<PaintedGuide> = emptyList()
+    private var animationStartedAt = 0L
+    private var cachedGuides: List<ScopeGuide> = emptyList()
+    private var cachedGuideLimit = -1
     private var cachedCaretLine = -1
     private var cachedModificationStamp = Long.MIN_VALUE
     private var cachedTabSize = -1
     private var cachedOpeners: Set<Char> = emptySet()
-    private var hasCachedGuide = false
+    private var hasCachedGuides = false
     private var cachedAnalysis: ScopeAnalysis? = null
     private var cachedAnalysisStamp = Long.MIN_VALUE
     private var cachedAnalysisTabSize = -1
@@ -97,14 +104,16 @@ internal class CurrentScopeIndentGuideController(
     fun onSettingsChanged() {
         if (disposed || editor.isDisposed) return
 
+        finishAnimation()
         applyNativeGuidePolicy()
-        hasCachedGuide = false
+        hasCachedGuides = false
 
-        if (settings.enabled && settings.shouldShowInEditor(editor.editorKind)) {
+        val state = settings.stateFor(project)
+        if (state.enabled && settings.shouldShowInEditor(editor.editorKind, project)) {
             updateHighlight()
         } else {
             updateAlarm.cancelAllRequests()
-            clearHighlight()
+            clearHighlights()
         }
     }
 
@@ -116,8 +125,9 @@ internal class CurrentScopeIndentGuideController(
      */
     fun onExternalIndentGuidesChanged() {
         if (disposed || editor.isDisposed) return
-        if (!settings.enabled || !settings.shouldShowInEditor(editor.editorKind)) return
-        if (settings.getState().keepNativeGuides) return
+        val state = settings.stateFor(project)
+        if (!state.enabled || !settings.shouldShowInEditor(editor.editorKind, project)) return
+        if (state.keepNativeGuides) return
 
         savedNativeIndentGuides = EditorSettingsExternalizable.getInstance().isIndentGuidesShown
         applyNativeGuidePolicy()
@@ -131,9 +141,10 @@ internal class CurrentScopeIndentGuideController(
     private fun applyNativeGuidePolicy() {
         if (editor.isDisposed) return
 
-        val shouldHide = settings.enabled &&
-            settings.shouldShowInEditor(editor.editorKind) &&
-            !settings.getState().keepNativeGuides
+        val state = settings.stateFor(project)
+        val shouldHide = state.enabled &&
+            settings.shouldShowInEditor(editor.editorKind, project) &&
+            !state.keepNativeGuides
         if (shouldHide) {
             if (savedNativeIndentGuides == null) {
                 savedNativeIndentGuides = editor.settings.isIndentGuidesShown
@@ -156,17 +167,17 @@ internal class CurrentScopeIndentGuideController(
     }
 
     private fun onFocusChanged() {
-        if (!settings.getState().showOnlyInActiveEditor) return
+        if (!settings.stateFor(project).showOnlyInActiveEditor) return
         // Wait until the focus transfer finishes before deciding which editor owns it.
         scheduleUpdate()
     }
 
     private fun shouldDrawGuide(): Boolean {
         if (disposed || editor.isDisposed) return false
-        if (!settings.shouldShowInEditor(editor.editorKind)) return false
-        val state = settings.getState()
+        if (!settings.shouldShowInEditor(editor.editorKind, project)) return false
+        val state = settings.stateFor(project)
         return shouldShowGuide(
-            enabled = settings.enabled,
+            enabled = state.enabled,
             onlyActiveEditor = state.showOnlyInActiveEditor,
             focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner,
             editorComponent = editor.contentComponent,
@@ -174,7 +185,7 @@ internal class CurrentScopeIndentGuideController(
     }
 
     override fun caretPositionChanged(event: CaretEvent) {
-        if (!settings.enabled) return
+        if (!settings.isEnabled(project)) return
         // Multiple carets still produce one custom guide: the one for the primary
         // caret. Moving a secondary caret cannot change it.
         if (event.caret != editor.caretModel.primaryCaret) return
@@ -184,15 +195,18 @@ internal class CurrentScopeIndentGuideController(
     }
 
     override fun caretAdded(event: CaretEvent) {
-        if (settings.enabled) scheduleUpdate()
+        if (settings.isEnabled(project)) scheduleUpdate()
     }
 
     override fun caretRemoved(event: CaretEvent) {
-        if (settings.enabled) scheduleUpdate()
+        if (settings.isEnabled(project)) scheduleUpdate()
     }
 
     override fun documentChanged(event: DocumentEvent) {
-        if (!settings.enabled) return
+        if (!settings.isEnabled(project)) return
+        // Fading guides reference line numbers from the previous snapshot; settle
+        // them before the debounced update rebuilds the current scopes.
+        finishAnimation()
         scheduleUpdate()
     }
 
@@ -201,16 +215,17 @@ internal class CurrentScopeIndentGuideController(
         disposed = true
 
         updateAlarm.cancelAllRequests()
+        animationAlarm.cancelAllRequests()
         if (!editor.isDisposed) {
             editor.caretModel.removeCaretListener(this)
             editor.contentComponent.removeFocusListener(focusListener)
             restoreNativeGuides()
         }
+        clearHighlights()
         Disposer.dispose(listenerDisposable)
-        clearHighlight()
         cachedAnalysis = null
-        cachedGuide = null
-        hasCachedGuide = false
+        cachedGuides = emptyList()
+        hasCachedGuides = false
     }
 
     /**
@@ -218,55 +233,96 @@ internal class CurrentScopeIndentGuideController(
      * keeps fast typing and rapid navigation cheap on large files.
      */
     private fun scheduleUpdate() {
-        if (!settings.enabled || disposed || editor.isDisposed) return
+        if (!settings.isEnabled(project) || disposed || editor.isDisposed) return
         updateAlarm.cancelRequest(updateRequest)
         updateAlarm.addRequest(updateRequest, UPDATE_DELAY_MS)
     }
 
     private fun updateHighlight() {
         if (!shouldDrawGuide()) {
-            clearHighlight()
+            clearHighlights()
             return
         }
 
-        val guide = getCurrentGuide()?.visibleWithFolds(collapsedFoldRanges())
-        if (guide == null) {
-            clearHighlight()
+        val state = settings.stateFor(project)
+        val folds = collapsedFoldRanges()
+        val guides = getCurrentGuides(state)
+            .mapNotNull { guide ->
+                val visible = guide.visibleWithFolds(folds) ?: return@mapNotNull null
+                // Column-0 guides are opt-in: at the file margin they are visually
+                // intrusive, so the default behavior is to leave those scopes unmarked.
+                if (visible.columnZero && !state.showColumnZeroGuide) return@mapNotNull null
+                visible
+            }
+            .mapIndexed { depth, guide -> GuideSpec(guide, depth) }
+        if (guides.isEmpty()) {
+            clearHighlights()
             return
         }
 
-        val state = settings.getState()
-        if (guide.columnZero && !state.showColumnZeroGuide) {
-            // Column-0 guides are opt-in: at the file margin they are visually
-            // intrusive, so the default behavior is to leave those scopes unmarked.
-            clearHighlight()
-            return
-        }
-        val existing = rangeHighlighter
-        if (guide == appliedGuide && existing?.isValid == true) {
-            // The range did not change: keep the highlighter and only refresh the
-            // renderer so color, stroke and radius changes apply immediately.
-            existing.customRenderer = createRenderer(guide, state)
+        val sameGuides = guides.size == paintedGuides.size &&
+            guides.indices.all { index ->
+                guides[index].guide == paintedGuides[index].guide &&
+                    guides[index].depth == paintedGuides[index].depth &&
+                    paintedGuides[index].highlighter.isValid
+            }
+        if (sameGuides) {
+            // The ranges did not change: keep the highlighters and only refresh the
+            // renderers so color, stroke, radius and fade settings apply immediately.
+            finishAnimation()
             return
         }
 
-        clearHighlight()
+        val canAnimate = state.animateScopeChanges &&
+            paintedGuides.isNotEmpty() &&
+            paintedGuides.all { it.highlighter.isValid }
+        if (!canAnimate) {
+            clearHighlights()
+            paintedGuides = guides.map { createPaintedGuide(it, state, progress = 1f) }
+            return
+        }
+
+        // Keep the previous frame as the fade-out layer, then paint the new scopes
+        // from zero opacity. Any transition still running is settled first.
+        finishAnimation()
+        fadingGuides = paintedGuides
+        paintedGuides = guides.map { createPaintedGuide(it, state, progress = 0f) }
+        animationStartedAt = System.nanoTime()
+        animationAlarm.addRequest(animationTick, 0)
+    }
+
+    private fun createPaintedGuide(
+        spec: GuideSpec,
+        state: IndentScopeSettings.State,
+        progress: Float,
+    ): PaintedGuide {
         val document = editor.document
         val highlighter = editor.markupModel.addRangeHighlighter(
-            document.getLineStartOffset(guide.anchorLine),
-            document.getLineEndOffset(guide.endLine),
+            document.getLineStartOffset(spec.guide.anchorLine),
+            document.getLineEndOffset(spec.guide.endLine),
             HighlighterLayer.CARET_ROW + 1,
             TextAttributes(),
             HighlighterTargetArea.EXACT_RANGE,
         )
-        highlighter.customRenderer = createRenderer(guide, state)
-        rangeHighlighter = highlighter
-        appliedGuide = guide
+        highlighter.customRenderer = createRenderer(spec.guide, state, spec.depth, progress)
+        return PaintedGuide(spec.guide, spec.depth, highlighter)
+    }
+
+    private fun refreshRenderer(
+        painted: PaintedGuide,
+        state: IndentScopeSettings.State,
+        progress: Float,
+    ) {
+        if (painted.highlighter.isValid) {
+            painted.highlighter.customRenderer = createRenderer(painted.guide, state, painted.depth, progress)
+        }
     }
 
     private fun createRenderer(
         guide: ScopeGuide,
         state: IndentScopeSettings.State,
+        depth: Int,
+        progress: Float,
     ): ActiveIndentGuideRenderer = ActiveIndentGuideRenderer(
         anchorLine = guide.anchorLine,
         endLine = guide.endLine,
@@ -275,35 +331,80 @@ internal class CurrentScopeIndentGuideController(
         columnZero = guide.columnZero,
         endsAtClosingLine = guide.endsAtClosingLine,
         customColor = if (state.customColorEnabled) java.awt.Color(state.customColorRgb) else null,
+        alpha = scopeGuideAlpha(depth) * progress.coerceIn(0f, 1f),
     )
+
+    /**
+     * Advances the optional fade between the previous and current scope frames.
+     * The ticker only updates renderers and repaints the editor; it never rescans
+     * the document.
+     */
+    private fun tickAnimation() {
+        if (disposed || editor.isDisposed) {
+            finishAnimation()
+            return
+        }
+
+        val elapsedMs = (System.nanoTime() - animationStartedAt) / NANOS_PER_MILLI
+        val progress = (elapsedMs / SCOPE_FADE_DURATION_MS).toFloat().coerceIn(0f, 1f)
+        val state = settings.stateFor(project)
+        fadingGuides.forEach { refreshRenderer(it, state, progress = 1f - progress) }
+        paintedGuides.forEach { refreshRenderer(it, state, progress = progress) }
+        editor.contentComponent.repaint()
+
+        if (progress < 1f) {
+            animationAlarm.addRequest(animationTick, ANIMATION_FRAME_MS)
+        } else {
+            finishAnimation()
+        }
+    }
+
+    /**
+     * Settles the fade immediately: old highlighters are removed, the current ones
+     * return to their configured opacity and any pending tick is cancelled.
+     */
+    private fun finishAnimation() {
+        animationAlarm.cancelRequest(animationTick)
+        if (!editor.isDisposed) {
+            fadingGuides.forEach { it.highlighter.dispose() }
+        }
+        fadingGuides = emptyList()
+        if (!editor.isDisposed && paintedGuides.isNotEmpty()) {
+            val state = settings.stateFor(project)
+            paintedGuides.forEach { refreshRenderer(it, state, progress = 1f) }
+        }
+    }
 
     /**
      * The guide cache is keyed by everything that can change the answer. The
      * analysis cache below additionally reuses the bracket index across caret
      * movements on the same document snapshot.
      */
-    private fun getCurrentGuide(): ScopeGuide? {
+    private fun getCurrentGuides(state: IndentScopeSettings.State): List<ScopeGuide> {
         val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
         val stamp = editor.document.modificationStamp
         val tabSize = editor.settings.getTabSize(editor.project).coerceAtLeast(1)
-        val openers = settings.allowedOpeners()
-        if (hasCachedGuide &&
+        val openers = settings.allowedOpeners(project)
+        val limit = if (state.showEnclosingScopes) state.maxEnclosingScopes else 1
+        if (hasCachedGuides &&
             caretLine == cachedCaretLine &&
             stamp == cachedModificationStamp &&
             tabSize == cachedTabSize &&
-            openers == cachedOpeners
+            openers == cachedOpeners &&
+            limit == cachedGuideLimit
         ) {
-            return cachedGuide
+            return cachedGuides
         }
 
-        val guide = getAnalysis(tabSize, openers).detector.findGuide(caretLine)
-        cachedGuide = guide
+        val guides = getAnalysis(tabSize, openers).detector.findGuides(caretLine, limit)
+        cachedGuides = guides
         cachedCaretLine = caretLine
         cachedModificationStamp = stamp
         cachedTabSize = tabSize
         cachedOpeners = openers
-        hasCachedGuide = true
-        return guide
+        cachedGuideLimit = limit
+        hasCachedGuides = true
+        return guides
     }
 
     private fun getAnalysis(tabSize: Int, openers: Set<Char>): ScopeAnalysis {
@@ -347,17 +448,33 @@ internal class CurrentScopeIndentGuideController(
         }
     }
 
-    private fun clearHighlight() {
+    private fun clearHighlights() {
+        animationAlarm.cancelRequest(animationTick)
         // Avoid touching the markup model of an editor that the platform has already
-        // disposed; the highlighter is gone with it.
+        // disposed; the highlighters are gone with it.
         if (!editor.isDisposed) {
-            rangeHighlighter?.dispose()
+            paintedGuides.forEach { it.highlighter.dispose() }
+            fadingGuides.forEach { it.highlighter.dispose() }
         }
-        rangeHighlighter = null
-        appliedGuide = null
+        paintedGuides = emptyList()
+        fadingGuides = emptyList()
     }
+
+    private data class GuideSpec(
+        val guide: ScopeGuide,
+        val depth: Int,
+    )
+
+    private data class PaintedGuide(
+        val guide: ScopeGuide,
+        val depth: Int,
+        val highlighter: RangeHighlighter,
+    )
 
     private companion object {
         private const val UPDATE_DELAY_MS = 20
+        private const val ANIMATION_FRAME_MS = 16
+        private const val SCOPE_FADE_DURATION_MS = 150.0
+        private const val NANOS_PER_MILLI = 1_000_000.0
     }
 }

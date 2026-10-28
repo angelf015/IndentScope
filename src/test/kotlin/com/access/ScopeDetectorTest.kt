@@ -5,8 +5,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.awt.Color
 import java.awt.geom.PathIterator
 import javax.swing.JPanel
 
@@ -135,6 +137,72 @@ class ScopeDetectorTest {
     }
 
     @Test
+    fun anchorsContinuationLineWithBraceAtDeclaration() {
+        val guide = detect(
+            text = "class TicketService {\n" +
+                "    public TicketService(FlyRepository flyRepository, CustomerRepository customerRepository,\n" +
+                "                         TicketRepository ticketRepository) {\n" +
+                "        this.ticketRepository = ticketRepository;\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 2,
+            fileName = "TicketService.java",
+        )
+
+        assertNotNull("The constructor body is a valid scope", guide)
+        assertEquals(
+            "The guide must start on the declaration line, not on its continuation",
+            1,
+            guide!!.anchorLine,
+        )
+        assertEquals(4, guide.endLine)
+    }
+
+    @Test
+    fun anchorsContinuationLineWithThrowsClauseAtDeclaration() {
+        val guide = detect(
+            text = "class TicketService {\n" +
+                "    public TicketService(\n" +
+                "        TicketRepository ticketRepository) throws IllegalArgumentException {\n" +
+                "        this.ticketRepository = ticketRepository;\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 2,
+            fileName = "TicketService.java",
+        )
+
+        assertNotNull("The constructor body is a valid scope", guide)
+        assertEquals(
+            "A declaration suffix after the closing parenthesis must not move the anchor",
+            1,
+            guide!!.anchorLine,
+        )
+        assertEquals(4, guide.endLine)
+    }
+
+    @Test
+    fun keepsChainedLambdaAnchoredOnItsOwnLine() {
+        val guide = detect(
+            text = "fun main() {\n" +
+                "    val x = listOf(\n" +
+                "        1,\n" +
+                "        2).map {\n" +
+                "        it + 1\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 3,
+        )
+
+        assertNotNull("The lambda body is a valid scope", guide)
+        assertEquals(
+            "A member-access chain starts a new construct on the current line",
+            3,
+            guide!!.anchorLine,
+        )
+        assertEquals(5, guide.endLine)
+    }
+
+    @Test
     fun supportsMixedIndentation() {
         val guide = detect(
             text = "fun main() {\n    if (true) {\n\t    doWork()\n\t}\n}\n",
@@ -196,6 +264,69 @@ class ScopeDetectorTest {
         assertNotNull(guide)
         assertEquals(1, guide!!.anchorLine)
         assertEquals(4, guide.endLine)
+    }
+
+    @Test
+    fun findsEnclosingScopesFromInnermost() {
+        val guides = detectGuides(
+            text = "class Example {\n" +
+                "    fun main() {\n" +
+                "        if (true) {\n" +
+                "            work()\n" +
+                "        }\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 3,
+            limit = 10,
+        )
+
+        assertEquals("Every enclosing scope should be returned", 3, guides.size)
+        assertEquals(2, guides[0].anchorLine)
+        assertEquals(1, guides[1].anchorLine)
+        assertEquals(0, guides[2].anchorLine)
+        assertEquals(4, guides[0].endLine)
+        assertEquals(5, guides[1].endLine)
+        assertEquals(6, guides[2].endLine)
+    }
+
+    @Test
+    fun limitsEnclosingScopes() {
+        val guides = detectGuides(
+            text = "class Example {\n" +
+                "    fun main() {\n" +
+                "        if (true) {\n" +
+                "            work()\n" +
+                "        }\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 3,
+            limit = 2,
+        )
+
+        assertEquals(2, guides.size)
+        assertEquals(2, guides[0].anchorLine)
+        assertEquals(1, guides[1].anchorLine)
+    }
+
+    @Test
+    fun disabledScopeTypesAreSkippedWhileWalkingOutward() {
+        val guides = detectGuides(
+            text = "class Example {\n" +
+                "    fun main() {\n" +
+                "        foo(\n" +
+                "            first,\n" +
+                "            second,\n" +
+                "        )\n" +
+                "    }\n" +
+                "}\n",
+            caretLine = 3,
+            limit = 10,
+            allowedOpeners = setOf('{'),
+        )
+
+        assertEquals("The disabled parenthesis must not appear", 2, guides.size)
+        assertEquals(1, guides[0].anchorLine)
+        assertEquals(0, guides[1].anchorLine)
     }
 
     @Test
@@ -317,6 +448,27 @@ class ScopeDetectorTest {
         assertEquals(100.0, path.bounds2D.maxY, 0.001)
     }
 
+    @Test
+    fun enclosingScopesFadeWithDepth() {
+        assertEquals(1f, scopeGuideAlpha(0))
+        assertEquals(0.75f, scopeGuideAlpha(1))
+        assertEquals(0.5f, scopeGuideAlpha(2))
+        assertEquals(0.25f, scopeGuideAlpha(3))
+        assertEquals("The outermost guides must remain visible", 0.25f, scopeGuideAlpha(20))
+    }
+
+    @Test
+    fun guideAlphaPreservesRgbAndScalesExistingAlpha() {
+        val color = Color(10, 20, 30, 128)
+        val faded = applyGuideAlpha(color, 0.5f)
+
+        assertEquals(10, faded.red)
+        assertEquals(20, faded.green)
+        assertEquals(30, faded.blue)
+        assertEquals(64, faded.alpha)
+        assertSame("A fully opaque guide keeps the original color", color, applyGuideAlpha(color, 1f))
+    }
+
     private fun moveToCount(path: java.awt.geom.Path2D): Int {
         val iterator = path.getPathIterator(null)
         val coordinates = DoubleArray(6)
@@ -338,5 +490,18 @@ class ScopeDetectorTest {
         val lines = TextLineMap(text)
         val brackets = TextBracketScanner(lines, text, TextSyntax.forFileName(fileName))
         return ScopeDetector(text, lines, brackets, tabSize, allowedOpeners).findGuide(caretLine)
+    }
+
+    private fun detectGuides(
+        text: String,
+        caretLine: Int,
+        limit: Int,
+        fileName: String = "Example.txt",
+        tabSize: Int = 4,
+        allowedOpeners: Set<Char> = setOf('{', '(', '['),
+    ): List<ScopeGuide> {
+        val lines = TextLineMap(text)
+        val brackets = TextBracketScanner(lines, text, TextSyntax.forFileName(fileName))
+        return ScopeDetector(text, lines, brackets, tabSize, allowedOpeners).findGuides(caretLine, limit)
     }
 }

@@ -27,15 +27,20 @@
         <br><br>
         Customize scope types, stroke width, corner radius, native-guide behavior, console/diff/preview
         editors and the guide color in <b>Settings → Tools → IndentScope</b>. The color is theme-aware and
-        can also be changed in <b>Settings → Editor → Color Scheme → IndentScope</b>. The interface is
-        available in English and Spanish.
+        can also be changed in <b>Settings → Editor → Color Scheme → IndentScope</b>. Enclosing-scope
+        guides are optional and dim each parent level, scope changes can fade over 150 ms, and global
+        settings can be overridden in <b>Settings → Tools → IndentScope (Project)</b> with inheritance
+        enabled by default. The interface is available in English and Spanish.
         <br><br>
         <b>Español:</b> resalta con un corchete redondeado la guía de indentación del ámbito actual,
         desde la línea que lo abre hasta su cierre <code>}</code>, <code>)</code> o <code>]</code>.
         Oculta las guías nativas solo mientras la guía está activa y las restaura al desactivarla.
         También responde a pliegues contraídos, líneas ajustadas, varios cursores y pantallas HiDPI.
         Configura los tipos de ámbito, el grosor, el radio, los editores auxiliares y el color en
-        <b>Ajustes → Herramientas → IndentScope</b>. Interfaz disponible en inglés y español.
+        <b>Ajustes → Herramientas → IndentScope</b>. Las guías de ámbitos contenedores son opcionales y
+        atenúan cada nivel padre, los cambios de ámbito pueden fundirse en 150 ms y la configuración global
+        se puede sustituir en <b>Ajustes → Herramientas → IndentScope (proyecto)</b>, con la herencia
+        activada por defecto. Interfaz disponible en inglés y español.
         <br><br>
         <b>Documentation:</b>
         <a href="https://github.com/angelf015/IndentScope#readme">English</a> ·
@@ -59,6 +64,11 @@
                                  instance="com.access.IndentScopeConfigurable"
                                  bundle="messages.IndentScopeBundle"
                                  key="settings.displayName"/>
+        <projectConfigurable parentId="tools"
+                             id="com.access.IndentScope.projectSettings"
+                             instance="com.access.IndentScopeProjectConfigurable"
+                             bundle="messages.IndentScopeBundle"
+                             key="settings.projectDisplayName"/>
         <colorSettingsPage implementation="com.access.IndentScopeColorSettingsPage"/>
         <statusBarWidgetFactory id="IndentScope.status"
                                 implementation="com.access.IndentScopeStatusBarWidgetFactory"/>

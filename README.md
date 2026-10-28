@@ -52,6 +52,8 @@ innermost enabled scope that contains the caret, and native indent guides stay h
 ## Features
 
 - Rounded indent guide for the scope containing the caret.
+- Optional guides for every enclosing scope, with a configurable limit and progressive attenuation.
+- Optional short fade when the current scope changes.
 - Supports scopes closed by `}`, `)` and `]`.
 - Shows the class-level guide for DTOs and other classes without methods. Guides for scopes that start at column 0 are
   opt-in.
@@ -59,7 +61,8 @@ innermost enabled scope that contains the caret, and native indent guides stay h
 - Shows top-level unbraced scopes, such as Python `def` and `class` blocks.
 - Shows multi-line empty blocks; single-line blocks intentionally draw no vertical guide.
 - Ignores brackets inside strings, comments, template literals and raw strings.
-- Anchors Allman-style declarations to the declaration line instead of the `{` line.
+- Anchors Allman-style declarations and multi-line signatures to the declaration line instead of the `{` or continuation
+  line.
 - Keeps the approved look: accent color, rounded corners, no horizontal arms on body lines.
 - Hides native indent guides only while the custom guide is active.
 - Restores the native indent-guide setting of each editor when disabled, including changes made through the IDE while
@@ -69,6 +72,7 @@ innermost enabled scope that contains the caret, and native indent guides stay h
 - Reuses the scope analysis and highlighter while the document and scope are unchanged, keeping large files responsive.
 - Console, diff and preview editors are supported as opt-in surfaces.
 - Settings panel in **Settings → Tools → IndentScope** for behavior and appearance.
+- Optional per-project settings with inheritance from the global configuration.
 - Theme-aware guide color, also customizable per color scheme.
 - Status-bar widget for a quick on/off toggle.
 - English and Spanish UI.
@@ -102,9 +106,10 @@ The feature can be disabled globally, for example while presenting code:
 It is also available in **View → Appearance → IndentScope Guide** and in **Find Action** (`Cmd+Shift+A` /
 `Ctrl+Shift+A`).
 
-- The state is persisted across IDE restarts.
-- Toggling applies immediately to every open editor and project.
-- New editors respect the current state.
+- The global state is persisted across IDE restarts.
+- Toggling applies immediately to every open editor. In a project that inherits the global settings it changes the global
+  state; in a project with its own settings it changes only that project.
+- New editors respect the effective state of their project.
 - While disabled, no scope scanning is performed.
 - Shortcuts can be reassigned in **Settings → Keymap**.
 
@@ -121,12 +126,15 @@ Open **Settings → Tools → IndentScope** to customize the plugin:
 | Keep native indent guides visible | Off | Draws the custom guide without hiding the IDE's indentation guides. |
 | Show the guide only in the active editor | Off | Useful with split editors: only the pane with keyboard focus shows the custom guide. |
 | Show the guide for scopes that start at column 0 | Off | Draws guides for scopes whose opener starts at column 0, such as top-level DTOs. |
+| Show enclosing scopes | Off | Draws the guides of the parent scopes around the current one. |
+| Maximum number of guides | 3 | Number of nested guides, from 1 to 10, when enclosing scopes are enabled. |
 | Blocks `{ }` | On | Enables guides for brace-delimited scopes, including indentation-only Python blocks. |
 | Parentheses `( )` | On | Enables guides for multi-line parentheses. |
 | Brackets `[ ]` | On | Enables guides for multi-line brackets. |
 | Stroke width | 1.5 px | Guide thickness, from 1.0 to 4.0 px in 0.5 px steps. |
 | Corner radius | 4 px | Rounding of the top and bottom corners, from 0 to 12 px. |
 | Use a custom guide color | Off | Overrides the theme color with a color chosen in the settings panel. |
+| Animate guide changes | Off | Adds a short 150 ms fade when the current scope changes. |
 | Console editors | Off | Draws the guide in console output editors. |
 | Diff editors | Off | Draws the guide in diff viewers. |
 | Preview editors | Off | Draws the guide in preview editors, such as search results or code-style previews. |
@@ -135,12 +143,35 @@ If a scope type is disabled, the guide falls back outward to the nearest enabled
 disappearing. At least one scope type must remain enabled. Main editors are always included; auxiliary editor types are
 independent and off by default.
 
+### Project settings
+
+Open **Settings → Tools → IndentScope (Project)** to configure a single project:
+
+- **Use global IndentScope settings** is on by default, so the project follows the global panel.
+- Turn it off to enable a full project override. The controls stay disabled while the project inherits.
+- **Copy global settings** fills the override with the current global values, which is a convenient starting point.
+- The override is stored in `.idea/indentScopeProject.xml` and can be committed with the project to share it with the
+  team. Files outside a project keep using the global settings.
+- In a project with an override, the action and the status-bar widget change only that project. A project that inherits
+  toggles the global state.
+
+### Enclosing scopes and animation
+
+Enable **Show enclosing scopes** to draw the chain of parent scopes in addition to the current one. Each parent level is
+dimmer than the previous one (100 %, 75 %, 50 %, then 25 %), so the innermost guide remains the focus. **Maximum number
+of guides** limits the chain from 1 to 10; the default is 3.
+
+**Animate guide changes** adds a 150 ms fade from the previous guide to the new one. It is off by default, and it settles
+immediately when the document or the settings change.
+
 ### Visual robustness
 
 - **Collapsed folds:** when the line that opens the scope or its closing line is hidden by a collapsed fold, the guide
   hides. A fold inside the body keeps the outer guide, and expanding the fold restores it immediately.
 - **Soft wrap:** the vertical stroke skips continuation rows whose text starts to its left, so it does not paint over
   wrapped content. The first and last rows keep the rounded arms.
+- **Multi-line signatures:** when the last parameter and the opening brace share a continuation row, the guide starts
+  on the declaration line, so the stroke never crosses the parameter or body text.
 - **Multiple carets:** the primary caret defines the current scope. Adding or removing carets refreshes the guide.
 - **HiDPI:** stroke width and corner radius are logical pixels. The editor already scales its `Graphics2D`, so applying
   the display scale again would double the size.
@@ -198,12 +229,13 @@ Useful commands while configuring:
 
 ## Known limitations
 
-- IndentScope draws one guide at a time: the innermost enabled scope that contains the primary caret. Parent scopes are
-  not drawn simultaneously, and additional carets do not produce additional guides.
+- By default, IndentScope draws one guide at a time: the innermost enabled scope that contains the primary caret. Enable
+  **Show enclosing scopes** to draw the parent scopes as well; additional carets still produce only one chain.
 - Scopes that start at column 0 are opt-in. Enable **Show the guide for scopes that start at column 0** when top-level
   declarations should show a guide.
 - A scope that opens and closes on the same line intentionally draws no vertical guide.
-- Settings are application-wide; per-project overrides are not available yet.
+- A project override applies only inside that project. Files opened outside a project, and projects that inherit, use the
+  global settings.
 - Scope detection uses the language's brace matcher when available. For plain text and languages without a matcher, a
   lexical fallback covers common string and comment syntaxes, but exotic syntaxes may not be recognized.
 - Console, diff and preview editors are opt-in and disabled by default.
@@ -269,11 +301,12 @@ blocks, mixed indentation, strings/comments with bracket-like content, backticks
 Allman-style declarations, settings persistence and migration, scope-type filtering with outward fallback, the settings
 panel, the color settings page, the status-bar widget, folded scopes, folds inside the body, multiple carets, auxiliary
 editor filtering, external indent-guide changes, real soft-wrapped editors, controller/service disposal, background
-editor registration, concurrent registration, and the opt-in column-0 guide with its vertical geometry and a pixel-level
-check that it avoids both boundary lines. A separate pure test suite covers the scope detector, fold visibility,
+editor registration, concurrent registration, the opt-in column-0 guide with its vertical geometry and a pixel-level
+check that it avoids both boundary lines, project settings inheritance and full overrides, enclosing-scope chains with
+their fading, and the animated transition. A separate pure test suite covers the scope detector, fold visibility,
 editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a performance suite verifies index
 reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks the English and Spanish resources.
-The suite currently has **99 tests** (69 platform/integration, 25 pure, 3 performance and 2 bundle tests).
+The suite currently has **116 tests** (81 platform/integration, 30 pure, 3 performance and 2 bundle tests).
 
 ## CI and quality
 

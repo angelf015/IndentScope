@@ -24,9 +24,18 @@ internal class ActiveIndentGuideRenderer(
     private val columnZero: Boolean,
     private val endsAtClosingLine: Boolean,
     internal val customColor: Color?,
+    internal val alpha: Float = 1f,
 ) : CustomHighlighterRenderer {
     override fun paint(editor: Editor, highlighter: RangeHighlighter, graphics: Graphics) {
-        val color = customColor ?: IndentScopeColors.guideColor(editor.colorsScheme) ?: return
+        val document = editor.document
+        val lineCount = document.lineCount
+        // A document edit can invalidate a fade-out frame before the debounced
+        // update removes it. Skip stale line numbers instead of throwing.
+        if (anchorLine !in 0 until lineCount || endLine !in 0 until lineCount || endLine < anchorLine) return
+
+        val baseColor = customColor ?: IndentScopeColors.guideColor(editor.colorsScheme) ?: return
+        val color = applyGuideAlpha(baseColor, alpha)
+        if (color.alpha == 0) return
 
         // The guide spans the scope: it starts on the line that opens it and ends at
         // the closing bracket (a `}`, `)` or `]` line). Indented guides sit half an
@@ -37,13 +46,13 @@ internal class ActiveIndentGuideRenderer(
         // one-pixel arm there would look like a stray dot. The stroke width and radius
         // are logical pixels; the editor's Graphics2D already applies the HiDPI scale,
         // so applying it again here would double the size.
-        val chars = editor.document.charsSequence
+        val chars = document.charsSequence
         val firstAnchor = lineTextAnchor(editor, chars, anchorLine) ?: return
         val lastAnchor = lineTextAnchor(editor, chars, endLine) ?: return
         val lineHeight = editor.lineHeight
         if (lineHeight <= 0) return
 
-        val lineStartX = editor.offsetToXY(editor.document.getLineStartOffset(anchorLine)).x
+        val lineStartX = editor.offsetToXY(document.getLineStartOffset(anchorLine)).x
         val leadingWidth = (firstAnchor.x - lineStartX).coerceAtLeast(0)
         val halfIndentStep = editor.settings.getTabSize(editor.project).coerceAtLeast(2) / 2f *
             graphics.fontMetrics.charWidth(' ').coerceAtLeast(1)
@@ -56,13 +65,13 @@ internal class ActiveIndentGuideRenderer(
         // the last one: above the closing bracket when there is one, or to the bottom
         // of the last body line for unbraced scopes such as Python's `def`.
         val firstLineBottomY = if (columnZero) {
-            val anchorEnd = editor.document.getLineEndOffset(anchorLine)
+            val anchorEnd = document.getLineEndOffset(anchorLine)
             editor.visualLineToY(editor.offsetToVisualLine(anchorEnd, true)) + lineHeight
         } else {
             firstAnchor.y + lineHeight
         }
         val lastLineTopY = if (columnZero) {
-            val endStart = editor.document.getLineStartOffset(endLine)
+            val endStart = document.getLineStartOffset(endLine)
             editor.visualLineToY(editor.offsetToVisualLine(endStart, false))
         } else {
             lastAnchor.y
@@ -175,6 +184,33 @@ internal class ActiveIndentGuideRenderer(
         private const val MIN_STROKE_WIDTH = 0.5f
     }
 }
+
+/**
+ * Applies a fade level to [color] while preserving the color's own alpha. A fully
+ * opaque level returns the original instance, which avoids allocations in the common
+ * single-guide case.
+ */
+internal fun applyGuideAlpha(color: Color, alpha: Float): Color {
+    val level = alpha.coerceIn(0f, 1f)
+    if (level >= 1f) return color
+    return Color(
+        color.red,
+        color.green,
+        color.blue,
+        (color.alpha * level).toInt().coerceIn(0, 255),
+    )
+}
+
+/**
+ * Opacity of an enclosing scope relative to the innermost one. The active guide keeps
+ * full opacity; each parent level fades one step and never drops below 25 %, so outer
+ * guides remain visible without competing with the current scope.
+ */
+internal fun scopeGuideAlpha(depth: Int): Float =
+    (1f - depth.coerceAtLeast(0) * ENCLOSING_SCOPE_ALPHA_STEP).coerceAtLeast(MIN_ENCLOSING_SCOPE_ALPHA)
+
+private const val ENCLOSING_SCOPE_ALPHA_STEP = 0.25f
+private const val MIN_ENCLOSING_SCOPE_ALPHA = 0.25f
 
 /**
  * Builds the path of the current-scope guide. With [drawArms] enabled it is the

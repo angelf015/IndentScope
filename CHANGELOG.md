@@ -6,6 +6,13 @@
 
 ### Added
 
+- Per-project settings through **Settings → Tools → IndentScope (Project)**. Projects inherit the global values by
+  default; disabling inheritance enables a full override stored in `.idea/indentScopeProject.xml`, with a button to copy
+  the current global values.
+- Optional enclosing-scope guides. **Show enclosing scopes** is off by default and draws up to 10 nested guides (3 by
+  default), fading each parent level to keep the innermost scope prominent.
+- Optional **Animate guide changes** setting that adds a short 150 ms fade when the current scope changes. It is off by
+  default and settles immediately on document or settings changes.
 - Lifecycle regression tests for controller/service disposal and concurrent editor registration.
 - Opt-in guides for scopes that start at column 0, such as top-level DTOs and Python modules. The new **Show the guide
   for scopes that start at column 0** setting is off by default and can be enabled in **Settings → Tools →
@@ -19,6 +26,9 @@
 
 ### Changed
 
+- The action, the status-bar widget and every open editor resolve the effective settings of their project, so a
+  project override applies immediately without touching the global configuration.
+- The application and project settings panels share the same rows, labels and validation.
 - Vendor and organization name updated to **NeoPlus** for future releases.
 - The build declares JDK 21 explicitly with `jvmToolchain(21)` and enforces ktlint formatting.
 - Status-bar source file renamed to `IndentScopeStatusBarWidgetFactory.kt` to match its public class.
@@ -71,6 +81,9 @@
 
 - The guide now reaches the closing `}` of a method or constructor whose declaration spans multiple lines, instead of
   stopping at the last body line.
+- A multi-line signature now anchors the guide on the declaration line when the opening brace shares a continuation row with
+  the last parameter or a declaration suffix such as `throws` (`TicketRepository ticketRepository) {`). Previously the
+  guide started on that row and its vertical stroke crossed the parameter and body text.
 - Classes without methods, such as Lombok DTOs, now show their class-level guide.
 - Column-0 guides no longer draw the tiny one-pixel end arms, which looked like stray dots. They are now plain vertical
   lines that start just below the opener line and end just above the closing line, so they never overlap the

@@ -21,14 +21,16 @@ class IndentScopeStatusBarWidgetFactory : StatusBarWidgetFactory {
 
     override fun isEnabledByDefault(): Boolean = true
 
-    override fun createWidget(project: Project): StatusBarWidget = IndentScopeStatusBarWidget()
+    override fun createWidget(project: Project): StatusBarWidget = IndentScopeStatusBarWidget(project)
 
     companion object {
         const val WIDGET_ID = "IndentScope.status"
     }
 }
 
-private class IndentScopeStatusBarWidget : StatusBarWidget, StatusBarWidget.TextPresentation {
+private class IndentScopeStatusBarWidget(
+    private val project: Project,
+) : StatusBarWidget, StatusBarWidget.TextPresentation {
 
     private var statusBar: StatusBar? = null
     private val settings: IndentScopeSettings
@@ -59,14 +61,14 @@ private class IndentScopeStatusBarWidget : StatusBarWidget, StatusBarWidget.Text
     }
 
     override fun getText(): String =
-        if (settings.enabled) {
+        if (settings.isEnabled(project)) {
             IndentScopeBundle.message("statusBar.enabled")
         } else {
             IndentScopeBundle.message("statusBar.disabled")
         }
 
     override fun getTooltipText(): String =
-        if (settings.enabled) {
+        if (settings.isEnabled(project)) {
             IndentScopeBundle.message("statusBar.tooltip.enabled")
         } else {
             IndentScopeBundle.message("statusBar.tooltip.disabled")
@@ -74,6 +76,8 @@ private class IndentScopeStatusBarWidget : StatusBarWidget, StatusBarWidget.Text
 
     override fun getAlignment(): Float = Component.CENTER_ALIGNMENT
 
-    override fun getClickConsumer(): Consumer<MouseEvent> =
-        Consumer { IndentScopeService.getInstance().enabled = !settings.enabled }
+    override fun getClickConsumer(): Consumer<MouseEvent> = Consumer {
+        val service = IndentScopeService.getInstance()
+        service.setEnabled(project, !service.isEnabled(project))
+    }
 }

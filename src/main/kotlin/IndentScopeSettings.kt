@@ -8,6 +8,8 @@ import com.intellij.openapi.components.SettingsCategory
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.editor.EditorKind
+import com.intellij.openapi.project.Project
+import com.intellij.serviceContainer.AlreadyDisposedException
 import com.intellij.util.messages.Topic
 
 /**
@@ -32,6 +34,9 @@ class IndentScopeSettings : PersistentStateComponent<IndentScopeSettings.State> 
         var keepNativeGuides: Boolean = false,
         var showOnlyInActiveEditor: Boolean = false,
         var showColumnZeroGuide: Boolean = false,
+        var showEnclosingScopes: Boolean = false,
+        var maxEnclosingScopes: Int = DEFAULT_MAX_ENCLOSING_SCOPES,
+        var animateScopeChanges: Boolean = false,
         var showBraceScopes: Boolean = true,
         var showParenScopes: Boolean = true,
         var showBracketScopes: Boolean = true,
@@ -78,44 +83,122 @@ class IndentScopeSettings : PersistentStateComponent<IndentScopeSettings.State> 
             notifyChanged()
         }
 
-    fun allowedOpeners(): Set<Char> = buildSet {
-        if (myState.showBraceScopes) add('{')
-        if (myState.showParenScopes) add('(')
-        if (myState.showBracketScopes) add('[')
+    /**
+     * Effective settings for [project]. A project whose settings are inherited uses
+     * the application state; application-level editors keep using it as well.
+     */
+    fun stateFor(project: Project?): State = projectState(project) ?: myState
+
+    fun isEnabled(project: Project?): Boolean = stateFor(project).enabled
+
+    /**
+     * Toggles the state at the narrowest scope: a project with its own settings
+     * updates its override, while an inherited project updates the global state.
+     */
+    fun setEnabled(project: Project?, value: Boolean) {
+        if (project == null || project.isDisposed) {
+            enabled = value
+            return
+        }
+
+        val projectSettings = try {
+            IndentScopeProjectSettings.getInstance(project)
+        } catch (e: AlreadyDisposedException) {
+            // The project can close between the action event and this lookup.
+            enabled = value
+            return
+        }
+        if (projectSettings.getState().useGlobalSettings) {
+            enabled = value
+        } else {
+            projectSettings.setEnabled(value)
+        }
     }
 
-    fun shouldShowInEditor(kind: EditorKind): Boolean = isEditorKindEnabled(
-        kind = kind,
-        showInConsoleEditors = myState.showInConsoleEditors,
-        showInDiffEditors = myState.showInDiffEditors,
-        showInPreviewEditors = myState.showInPreviewEditors,
-    )
-
-    private fun notifyChanged() {
-        val application = ApplicationManager.getApplication() ?: return
-        application.messageBus.syncPublisher(IndentScopeSettingsListener.TOPIC).settingsChanged()
+    fun allowedOpeners(project: Project? = null): Set<Char> = buildSet {
+        val state = stateFor(project)
+        if (state.showBraceScopes) add('{')
+        if (state.showParenScopes) add('(')
+        if (state.showBracketScopes) add('[')
     }
 
-    private fun normalize(state: State): State = state.apply {
-        strokeWidth = strokeWidth.coerceIn(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
-        cornerRadius = cornerRadius.coerceIn(MIN_CORNER_RADIUS, MAX_CORNER_RADIUS)
-        customColorRgb = customColorRgb and 0xFFFFFF
+    fun shouldShowInEditor(kind: EditorKind, project: Project? = null): Boolean {
+        val state = stateFor(project)
+        return isEditorKindEnabled(
+            kind = kind,
+            showInConsoleEditors = state.showInConsoleEditors,
+            showInDiffEditors = state.showInDiffEditors,
+            showInPreviewEditors = state.showInPreviewEditors,
+        )
     }
+
+    private fun projectState(project: Project?): State? {
+        if (project == null || project.isDisposed) return null
+        return try {
+            IndentScopeProjectSettings.getInstance(project).effectiveState()
+        } catch (e: AlreadyDisposedException) {
+            // The project can close between the editor event and this lookup.
+            null
+        }
+    }
+
+    private fun notifyChanged() = publishIndentScopeSettingsChanged()
+
+    private fun normalize(state: State): State = normalizeState(state)
 
     companion object {
         const val MIN_STROKE_WIDTH = 1.0
         const val MAX_STROKE_WIDTH = 4.0
         const val MIN_CORNER_RADIUS = 0
         const val MAX_CORNER_RADIUS = 12
+        const val MIN_ENCLOSING_SCOPES = 1
+        const val MAX_ENCLOSING_SCOPES = 10
         const val DEFAULT_STROKE_WIDTH = 1.5
         const val DEFAULT_CORNER_RADIUS = 4
+        const val DEFAULT_MAX_ENCLOSING_SCOPES = 3
         const val DEFAULT_CUSTOM_COLOR_RGB = 0x4A88C7
 
         private const val LEGACY_ENABLED_KEY = "IndentScope.enabled"
 
+        internal fun normalizeState(state: State): State = state.apply {
+            strokeWidth = strokeWidth.coerceIn(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+            cornerRadius = cornerRadius.coerceIn(MIN_CORNER_RADIUS, MAX_CORNER_RADIUS)
+            maxEnclosingScopes = maxEnclosingScopes.coerceIn(MIN_ENCLOSING_SCOPES, MAX_ENCLOSING_SCOPES)
+            customColorRgb = customColorRgb and 0xFFFFFF
+        }
+
         fun getInstance(): IndentScopeSettings =
             ApplicationManager.getApplication().getService(IndentScopeSettings::class.java)
     }
+}
+
+/**
+ * Copies every persisted option into [target]. The configurable and the project
+ * settings panel use it to keep their drafts in sync without listing options twice.
+ */
+internal fun IndentScopeSettings.State.copyFrom(source: IndentScopeSettings.State) {
+    enabled = source.enabled
+    keepNativeGuides = source.keepNativeGuides
+    showOnlyInActiveEditor = source.showOnlyInActiveEditor
+    showColumnZeroGuide = source.showColumnZeroGuide
+    showEnclosingScopes = source.showEnclosingScopes
+    maxEnclosingScopes = source.maxEnclosingScopes
+    animateScopeChanges = source.animateScopeChanges
+    showBraceScopes = source.showBraceScopes
+    showParenScopes = source.showParenScopes
+    showBracketScopes = source.showBracketScopes
+    showInConsoleEditors = source.showInConsoleEditors
+    showInDiffEditors = source.showInDiffEditors
+    showInPreviewEditors = source.showInPreviewEditors
+    strokeWidth = source.strokeWidth
+    cornerRadius = source.cornerRadius
+    customColorEnabled = source.customColorEnabled
+    customColorRgb = source.customColorRgb
+}
+
+internal fun publishIndentScopeSettingsChanged() {
+    val application = ApplicationManager.getApplication() ?: return
+    application.messageBus.syncPublisher(IndentScopeSettingsListener.TOPIC).settingsChanged()
 }
 
 /**

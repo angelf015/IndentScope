@@ -53,6 +53,8 @@ personalizada está activa.
 ## Características
 
 - Guía de indentación redondeada para el ámbito que contiene el cursor.
+- Guías opcionales para todos los ámbitos contenedores, con límite configurable y atenuación progresiva.
+- Fundido breve opcional al cambiar de ámbito.
 - Ámbitos cerrados por `}`, `)` y `]`.
 - Muestra la guía de clase en los DTO y en otras clases sin métodos. Las guías para ámbitos que empiezan en la columna
   0 son opcionales.
@@ -60,7 +62,8 @@ personalizada está activa.
 - Muestra ámbitos sin llaves de nivel superior, como los bloques `def` y `class` de Python.
 - Muestra bloques vacíos de varias líneas; los bloques de una sola línea no dibujan guía vertical de forma intencionada.
 - Ignora los corchetes que aparecen dentro de cadenas, comentarios, plantillas de cadena y cadenas sin procesar.
-- Ancla las declaraciones de estilo Allman a la línea de declaración en lugar de a la línea del `{`.
+- Ancla las declaraciones de estilo Allman y las firmas de varias líneas a la línea de declaración en lugar de a la
+  línea del `{` o de continuación.
 - Mantiene el aspecto aprobado: color de acento, esquinas redondeadas y sin brazos horizontales en las líneas del cuerpo.
 - Oculta las guías de indentación nativas solo mientras la guía personalizada está activa.
 - Restaura la configuración de guías nativas de cada editor al desactivar la guía, incluso si se cambió desde el IDE
@@ -72,6 +75,7 @@ personalizada está activa.
   edición de archivos grandes.
 - Los editores de consola, de diferencias y de vista previa son superficies opcionales.
 - Panel de ajustes en **Ajustes → Herramientas → IndentScope** para el comportamiento y la apariencia.
+- Configuración opcional por proyecto con herencia de la configuración global.
 - Color de la guía adaptado al tema y personalizable por esquema de colores.
 - Widget en la barra de estado para activar o desactivar la guía rápidamente.
 - Interfaz en inglés y español.
@@ -105,9 +109,10 @@ La función se puede desactivar globalmente, por ejemplo durante una presentaci�
 También está disponible en **Ver → Apariencia → Guía de IndentScope** y en **Buscar acción** (`Cmd+Shift+A` /
 `Ctrl+Shift+A`).
 
-- El estado se conserva entre reinicios del IDE.
-- El cambio se aplica inmediatamente a todos los editores y proyectos abiertos.
-- Los editores nuevos respetan el estado actual.
+- El estado global se conserva entre reinicios del IDE.
+- El cambio se aplica inmediatamente a todos los editores abiertos. En un proyecto que hereda la configuración global
+  cambia el estado global; en un proyecto con configuración propia cambia solo ese proyecto.
+- Los editores nuevos respetan el estado efectivo de su proyecto.
 - Mientras está desactivada no se analiza ningún ámbito.
 - Los atajos se pueden reasignar en **Ajustes → Keymap**.
 
@@ -124,12 +129,15 @@ Abre **Ajustes → Herramientas → IndentScope** para personalizar el plugin:
 | Mantener visibles las guías de indentación nativas | Desactivado | Dibuja la guía personalizada sin ocultar las guías de indentación del IDE. |
 | Mostrar la guía solo en el editor activo | Desactivado | Útil con editores divididos: solo el panel con el foco muestra la guía personalizada. |
 | Mostrar la guía para ámbitos que empiezan en la columna 0 | Desactivado | Dibuja guías para ámbitos cuyo inicio está en la columna 0, como DTO de nivel superior. |
+| Mostrar ámbitos contenedores | Desactivado | Dibuja las guías de los ámbitos padres alrededor del actual. |
+| Número máximo de guías | 3 | Cantidad de guías anidadas, de 1 a 10, cuando los ámbitos contenedores están activados. |
 | Bloques `{ }` | Activado | Habilita guías para ámbitos delimitados por llaves, incluidos los bloques de Python basados solo en indentación. |
 | Paréntesis `( )` | Activado | Habilita guías para paréntesis de varias líneas. |
 | Corchetes `[ ]` | Activado | Habilita guías para corchetes de varias líneas. |
 | Grosor del trazo | 1,5 px | Grosor de la guía, de 1,0 a 4,0 px en pasos de 0,5 px. |
 | Radio de las esquinas | 4 px | Redondeo de las esquinas superior e inferior, de 0 a 12 px. |
 | Usar un color personalizado para la guía | Desactivado | Sustituye el color del tema por un color elegido en el panel de ajustes. |
+| Animar los cambios de ámbito | Desactivado | Añade un fundido breve de 150 ms cuando cambia el ámbito actual. |
 | Editores de consola | Desactivado | Dibuja la guía en los editores de salida de consola. |
 | Editores de diferencias | Desactivado | Dibuja la guía en los visores de diferencias. |
 | Editores de vista previa | Desactivado | Dibuja la guía en editores de vista previa, como resultados de búsqueda o vistas previas de estilo de código. |
@@ -138,6 +146,29 @@ Si se desactiva un tipo de ámbito, la guía se repliega hacia fuera hasta el á
 desaparecer. Al menos un tipo de ámbito debe permanecer activo. Los editores principales se incluyen siempre; los tipos
 de editor auxiliares son independientes y están desactivados por defecto.
 
+### Configuración del proyecto
+
+Abre **Ajustes → Herramientas → IndentScope (proyecto)** para configurar un proyecto concreto:
+
+- **Usar la configuración global de IndentScope** está activado por defecto, así que el proyecto sigue el panel global.
+- Desactívalo para habilitar una configuración propia completa. Los controles permanecen deshabilitados mientras el
+  proyecto hereda.
+- **Copiar configuración global** rellena la configuración propia con los valores globales actuales, un punto de partida
+  cómodo.
+- La configuración propia se guarda en `.idea/indentScopeProject.xml` y se puede incluir en el control de versiones para
+  compartirla con el equipo. Los archivos fuera de un proyecto siguen usando la configuración global.
+- En un proyecto con configuración propia, la acción y el widget de la barra de estado cambian solo ese proyecto. Un
+  proyecto que hereda modifica el estado global.
+
+### Ámbitos contenedores y animación
+
+Activa **Mostrar ámbitos contenedores** para dibujar la cadena de ámbitos padres además del actual. Cada nivel padre es
+más tenue que el anterior (100 %, 75 %, 50 % y después 25 %), de modo que la guía más interna sigue siendo el foco.
+**Número máximo de guías** limita la cadena de 1 a 10; el valor predeterminado es 3.
+
+**Animar los cambios de ámbito** añade un fundido de 150 ms entre la guía anterior y la nueva. Está desactivado por
+defecto y se asienta de inmediato cuando cambian el documento o los ajustes.
+
 ### Robustez visual
 
 - **Pliegues contraídos:** cuando la línea que abre el ámbito o su línea de cierre queda oculta por un pliegue
@@ -145,6 +176,8 @@ de editor auxiliares son independientes y están desactivados por defecto.
   inmediato.
 - **Ajuste de línea:** el trazo vertical omite las filas de continuación cuyo texto empieza a su izquierda, por lo que no
   pinta sobre el contenido ajustado. La primera y la última fila conservan los brazos redondeados.
+- **Firmas de varias líneas:** cuando el último parámetro y la llave de apertura comparten una fila de continuación, la
+  guía empieza en la línea de declaración, por lo que el trazo nunca cruza el parámetro ni el texto del cuerpo.
 - **Varios cursores:** el cursor primario define el ámbito actual. Añadir o quitar cursores actualiza la guía.
 - **HiDPI:** el grosor del trazo y el radio de las esquinas se expresan en píxeles lógicos. El editor ya escala su
   `Graphics2D`, así que aplicar de nuevo la escala de la pantalla duplicaría el tamaño.
@@ -202,12 +235,14 @@ Comandos útiles durante la configuración:
 
 ## Limitaciones conocidas
 
-- IndentScope dibuja una guía cada vez: el ámbito habilitado más interno que contiene el cursor primario. Los ámbitos
-  padre no se dibujan simultáneamente y los cursores adicionales no generan guías adicionales.
+- Por defecto, IndentScope dibuja una guía cada vez: el ámbito habilitado más interno que contiene el cursor primario.
+  Activa **Mostrar ámbitos contenedores** para dibujar también los ámbitos padres; los cursores adicionales siguen
+  generando una sola cadena.
 - Los ámbitos que empiezan en la columna 0 son opcionales. Activa **Mostrar la guía para ámbitos que empiezan en la
   columna 0** si quieres que las declaraciones de nivel superior muestren guía.
 - Un ámbito que abre y cierra en la misma línea no dibuja guía vertical de forma intencionada.
-- Los ajustes son globales; todavía no se pueden sobrescribir por proyecto.
+- La configuración propia de un proyecto se aplica solo dentro de ese proyecto. Los archivos abiertos fuera de un
+  proyecto y los proyectos que heredan usan la configuración global.
 - La detección de ámbitos usa el emparejador de llaves del lenguaje cuando está disponible. Para texto plano y lenguajes
   sin emparejador, un analizador léxico de respaldo cubre las sintaxis habituales de cadenas y comentarios, pero puede no
   reconocer sintaxis exóticas.
@@ -277,13 +312,14 @@ anidados, las declaraciones de estilo Allman, la persistencia y migración de aj
 con repliegue hacia fuera, el panel de ajustes, la página de colores, el widget de la barra de estado, los ámbitos plegados, los
 pliegues dentro del cuerpo, los cursores múltiples, el filtrado de editores auxiliares, los cambios externos de guías
 nativas, los editores reales con ajuste de línea, el ciclo de vida de controladores y servicios, el registro de editores
-en segundo plano, el registro concurrente y la guía opcional de columna 0 con su geometría vertical y una comprobación a
-nivel de píxel de que evita ambas líneas de borde. Un conjunto de pruebas puras independiente cubre el detector de
-ámbitos, la visibilidad de pliegues, el filtrado por tipo de editor y la segmentación de rutas con ajuste de línea sin
-arrancar el IDE, y un conjunto de pruebas de rendimiento verifica la reutilización del índice y la resolución de la guía
-en archivos de 80 000 a 100 000 líneas. Una prueba de paquetes de recursos comprueba los recursos en inglés y español. El
-conjunto tiene actualmente **99 pruebas** (69 de plataforma/integración, 25 puras, 3 de rendimiento y 2 de paquetes de
-recursos).
+en segundo plano, el registro concurrente, la guía opcional de columna 0 con su geometría vertical y una comprobación a
+nivel de píxel de que evita ambas líneas de borde, la herencia y el override completo de la configuración por proyecto,
+las cadenas de ámbitos contenedores con su atenuación y la transición animada. Un conjunto de pruebas puras independiente
+cubre el detector de ámbitos, la visibilidad de pliegues, el filtrado por tipo de editor y la segmentación de rutas con
+ajuste de línea sin arrancar el IDE, y un conjunto de pruebas de rendimiento verifica la reutilización del índice y la
+resolución de la guía en archivos de 80 000 a 100 000 líneas. Una prueba de paquetes de recursos comprueba los recursos
+en inglés y español. El conjunto tiene actualmente **116 pruebas** (81 de plataforma/integración, 30 puras, 3 de
+rendimiento y 2 de paquetes de recursos).
 
 ## CI y calidad
 

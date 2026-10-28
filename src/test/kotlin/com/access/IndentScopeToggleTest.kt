@@ -14,6 +14,7 @@ import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.testFramework.EditorTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.util.xmlb.XmlSerializer
 import java.awt.image.BufferedImage
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -36,6 +37,11 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
             "Settings must be registered under Tools",
             1,
             document.getElementsByTagName("applicationConfigurable").length,
+        )
+        assertEquals(
+            "The project override must be registered under Tools",
+            1,
+            document.getElementsByTagName("projectConfigurable").length,
         )
         assertEquals(
             "The color settings page must be registered",
@@ -164,10 +170,14 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         get() = ApplicationManager.getApplication().getService(IndentScopeService::class.java)
 
     private var originalSettings: IndentScopeSettings.State? = null
+    private var originalProjectState: IndentScopeProjectSettings.State? = null
 
     override fun setUp() {
         super.setUp()
         originalSettings = IndentScopeSettings.getInstance().getState().copy()
+        originalProjectState = IndentScopeProjectSettings.getInstance(project).getState().let {
+            it.copy(overrides = it.overrides.copy())
+        }
         // Most integration fixtures use top-level scopes at column 0. Keep the
         // historical visibility for those tests; the opt-in default and the new
         // vertical geometry have dedicated tests below.
@@ -179,6 +189,7 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
     override fun tearDown() {
         try {
             originalSettings?.let { IndentScopeSettings.getInstance().apply(it) }
+            originalProjectState?.let { IndentScopeProjectSettings.getInstance(project).loadState(it) }
         } finally {
             super.tearDown()
         }
@@ -272,6 +283,153 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
 
         settings.enabled = true
         assertTrue(settings.getState().enabled)
+    }
+
+    fun testProjectSettingsInheritGlobalByDefault() {
+        val projectSettings = IndentScopeProjectSettings.getInstance(project)
+        projectSettings.apply(IndentScopeProjectSettings.State())
+
+        try {
+            updateSettings { enabled = false }
+            assertTrue(
+                "Projects inherit the global settings by default",
+                projectSettings.getState().useGlobalSettings,
+            )
+            assertFalse(
+                "An inherited project follows the global toggle",
+                IndentScopeSettings.getInstance().isEnabled(project),
+            )
+            assertFalse(IndentScopeService.getInstance().isEnabled(project))
+        } finally {
+            updateSettings { enabled = true }
+            projectSettings.apply(IndentScopeProjectSettings.State())
+        }
+    }
+
+    fun testProjectSettingsCanOverrideGlobal() {
+        val projectSettings = IndentScopeProjectSettings.getInstance(project)
+        val global = IndentScopeSettings.getInstance()
+
+        try {
+            projectSettings.apply(
+                IndentScopeProjectSettings.State(
+                    useGlobalSettings = false,
+                    overrides = global.getState().copy(
+                        enabled = false,
+                        showEnclosingScopes = true,
+                        maxEnclosingScopes = 5,
+                    ),
+                ),
+            )
+
+            assertFalse("The project override must win over the global toggle", global.isEnabled(project))
+            assertTrue("Global settings must stay unchanged", global.enabled)
+            assertTrue(projectSettings.effectiveState().showEnclosingScopes)
+            assertEquals(5, projectSettings.effectiveState().maxEnclosingScopes)
+        } finally {
+            projectSettings.apply(IndentScopeProjectSettings.State())
+        }
+    }
+
+    fun testProjectOverrideDrivesOpenEditor() {
+        val editor = configureBlockEditor()
+        val projectSettings = IndentScopeProjectSettings.getInstance(project)
+        val global = IndentScopeSettings.getInstance()
+        activate(editor)
+        try {
+            assertTrue("The inherited project shows the global guide", hasCustomGuide(editor))
+
+            projectSettings.apply(
+                IndentScopeProjectSettings.State(
+                    useGlobalSettings = false,
+                    overrides = global.getState().copy(enabled = false),
+                ),
+            )
+            assertFalse("A disabled project override must hide the guide", hasCustomGuide(editor))
+
+            global.enabled = false
+            projectSettings.apply(
+                IndentScopeProjectSettings.State(
+                    useGlobalSettings = false,
+                    overrides = global.getState().copy(enabled = true),
+                ),
+            )
+            assertTrue("A project can enable the guide while the global state is off", hasCustomGuide(editor))
+            assertFalse("The project override must not change the global state", global.enabled)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testProjectToggleUsesOverrideWhenPresent() {
+        val projectSettings = IndentScopeProjectSettings.getInstance(project)
+        val global = IndentScopeSettings.getInstance()
+        projectSettings.apply(
+            IndentScopeProjectSettings.State(
+                useGlobalSettings = false,
+                overrides = global.getState().copy(enabled = true),
+            ),
+        )
+
+        try {
+            IndentScopeService.getInstance().setEnabled(project, false)
+
+            assertFalse("The project override must receive the toggle", projectSettings.getState().overrides.enabled)
+            assertTrue("The global state must stay untouched", global.enabled)
+        } finally {
+            projectSettings.apply(IndentScopeProjectSettings.State())
+        }
+    }
+
+    fun testInheritedProjectToggleUpdatesGlobal() {
+        val projectSettings = IndentScopeProjectSettings.getInstance(project)
+        val global = IndentScopeSettings.getInstance()
+        global.enabled = true
+        projectSettings.apply(IndentScopeProjectSettings.State())
+
+        try {
+            IndentScopeService.getInstance().setEnabled(project, false)
+
+            assertTrue(projectSettings.getState().useGlobalSettings)
+            assertFalse("An inherited project toggles the global state", global.enabled)
+        } finally {
+            global.enabled = true
+            projectSettings.apply(IndentScopeProjectSettings.State())
+        }
+    }
+
+    fun testProjectSettingsStateSerializesNestedOverrides() {
+        val state = IndentScopeProjectSettings.State(
+            useGlobalSettings = false,
+            overrides = IndentScopeSettings.State(
+                enabled = false,
+                showEnclosingScopes = true,
+                maxEnclosingScopes = 5,
+                animateScopeChanges = true,
+                strokeWidth = 2.5,
+            ),
+        )
+
+        val element = XmlSerializer.serialize(state)
+        val restored = XmlSerializer.deserialize(element, IndentScopeProjectSettings.State::class.java)
+
+        assertFalse(restored.useGlobalSettings)
+        assertFalse(restored.overrides.enabled)
+        assertTrue(restored.overrides.showEnclosingScopes)
+        assertEquals(5, restored.overrides.maxEnclosingScopes)
+        assertTrue(restored.overrides.animateScopeChanges)
+        assertEquals(2.5, restored.overrides.strokeWidth, 0.001)
+    }
+
+    fun testProjectConfigurableCanBeCreated() {
+        val configurable = IndentScopeProjectConfigurable(project)
+        assertEquals("com.access.IndentScope.projectSettings", configurable.id)
+        assertEquals("IndentScope (Project)", configurable.displayName)
+
+        val component = configurable.createComponent()
+        assertNotNull(component)
+        assertFalse("A freshly reset project panel should not be modified", configurable.isModified())
+        configurable.disposeUIResources()
     }
 
     fun testColumnZeroGuideIsHiddenByDefault() {
@@ -648,6 +806,28 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
                 document.getLineEndOffset(6),
                 guide.endOffset,
             )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testContinuationLineGuideStartsAtDeclaration() {
+        myFixture.configureByText(
+            "Example.java",
+            """
+            class TicketService {
+                public TicketService(FlyRepository flyRepository, CustomerRepository customerRepository,
+                                     TicketRepository ticketRepository) {
+                    this.ticketRepository = ticketRepository;
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(2, 30))
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 4)
         } finally {
             service.editorReleased(editor)
         }
@@ -1299,6 +1479,110 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         }
     }
 
+    fun testEnclosingScopesAreOptInByDefault() {
+        val editor = configureDeepBlockEditor()
+        activate(editor)
+        try {
+            assertEquals(
+                "Only the innermost guide is shown unless enclosing scopes are enabled",
+                1,
+                customGuides(editor).size,
+            )
+            assertGuideSpansLines(editor, startLine = 2, endLine = 4)
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testEnclosingScopesShowNestedGuides() {
+        updateSettings { showEnclosingScopes = true }
+        val editor = configureDeepBlockEditor()
+        activate(editor)
+        try {
+            assertGuideRanges(
+                editor,
+                listOf(
+                    0 to 6,
+                    1 to 5,
+                    2 to 4,
+                ),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testEnclosingScopeLimitIsApplied() {
+        updateSettings {
+            showEnclosingScopes = true
+            maxEnclosingScopes = 2
+        }
+        val editor = configureDeepBlockEditor()
+        activate(editor)
+        try {
+            assertGuideRanges(
+                editor,
+                listOf(
+                    1 to 5,
+                    2 to 4,
+                ),
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testEnclosingScopesAreAttenuated() {
+        updateSettings { showEnclosingScopes = true }
+        val editor = configureDeepBlockEditor()
+        activate(editor)
+        try {
+            val document = editor.document
+            val renderers = customGuides(editor).associate { highlighter ->
+                highlighter.startOffset to (highlighter.customRenderer as ActiveIndentGuideRenderer)
+            }
+
+            assertEquals(
+                1f,
+                renderers.getValue(document.getLineStartOffset(2)).alpha,
+            )
+            assertEquals(
+                "The method guide should be dimmer than the active scope",
+                0.75f,
+                renderers.getValue(document.getLineStartOffset(1)).alpha,
+            )
+            assertEquals(
+                "The class guide should be dimmer still",
+                0.5f,
+                renderers.getValue(document.getLineStartOffset(0)).alpha,
+            )
+        } finally {
+            service.editorReleased(editor)
+        }
+    }
+
+    fun testAnimatedScopeChangeSettlesOnNewGuide() {
+        updateSettings { animateScopeChanges = true }
+        val editor = configureBlockEditor()
+        activate(editor)
+        try {
+            assertGuideSpansLines(editor, startLine = 1, endLine = 3)
+
+            editor.caretModel.moveToLogicalPosition(LogicalPosition(0, 4))
+            PlatformTestUtil.waitForAlarm(500)
+
+            assertEquals(
+                "The fade must leave only the new guide",
+                1,
+                customGuides(editor).size,
+            )
+            assertGuideSpansLines(editor, startLine = 0, endLine = 4)
+        } finally {
+            updateSettings { animateScopeChanges = false }
+            service.editorReleased(editor)
+        }
+    }
+
     fun testPreviewEditorIsFilteredByDefaultAndCanBeEnabled() {
         val document = EditorFactory.getInstance().createDocument(
             "fun main() {\n    if (true) {\n        doWork()\n    }\n}\n",
@@ -1588,6 +1872,24 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         return editor
     }
 
+    private fun configureDeepBlockEditor(): EditorEx {
+        myFixture.configureByText(
+            "Example.txt",
+            """
+            class Example {
+                fun main() {
+                    if (true) {
+                        work()
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        val editor = myFixture.editor as EditorEx
+        editor.caretModel.moveToLogicalPosition(LogicalPosition(3, 12))
+        return editor
+    }
+
     private fun configureTopLevelDtoEditor(): EditorEx {
         myFixture.configureByText(
             "UserDto.java",
@@ -1617,8 +1919,20 @@ class IndentScopeToggleTest : BasePlatformTestCase() {
         settings.apply(settings.getState().copy().apply(block))
     }
 
-    private fun customGuide(editor: EditorEx): RangeHighlighter? = editor.markupModel.allHighlighters.firstOrNull {
-        it.customRenderer?.javaClass?.name == "com.access.ActiveIndentGuideRenderer"
+    private fun customGuides(editor: EditorEx): List<RangeHighlighter> =
+        editor.markupModel.allHighlighters.filter { it.customRenderer is ActiveIndentGuideRenderer }
+
+    private fun customGuide(editor: EditorEx): RangeHighlighter? = customGuides(editor).firstOrNull()
+
+    private fun assertGuideRanges(editor: EditorEx, expected: List<Pair<Int, Int>>) {
+        val document = editor.document
+        val actual = customGuides(editor)
+            .sortedBy { it.startOffset }
+            .map { highlighter ->
+                document.getLineNumber(highlighter.startOffset) to document.getLineNumber(highlighter.endOffset)
+            }
+
+        assertEquals("Guide line ranges", expected, actual)
     }
 
     private fun assertGuideSpansLines(editor: EditorEx, startLine: Int, endLine: Int) {

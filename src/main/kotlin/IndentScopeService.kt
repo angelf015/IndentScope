@@ -8,6 +8,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import java.beans.PropertyChangeListener
 import java.util.concurrent.ConcurrentHashMap
@@ -67,9 +68,21 @@ class IndentScopeService : Disposable {
         set(value) {
             if (disposed || settings.enabled == value) return
             // The settings service publishes the change and this service refreshes
-            // every open editor. Keeping this facade preserves the action and test API.
+            // every open editor. Keeping this facade preserves the application API.
             settings.enabled = value
         }
+
+    /** Effective state for [project], including its optional override. */
+    fun isEnabled(project: Project?): Boolean = settings.isEnabled(project)
+
+    /**
+     * Toggles the effective state. Projects that inherit update the global setting;
+     * projects with an override update only their own value.
+     */
+    fun setEnabled(project: Project?, value: Boolean) {
+        if (disposed) return
+        settings.setEnabled(project, value)
+    }
 
     fun editorCreated(editor: EditorEx) {
         if (disposed) return
@@ -82,7 +95,7 @@ class IndentScopeService : Disposable {
         pruneDisposedControllers()
 
         if (controllers.containsKey(editor)) return
-        if (!settings.shouldShowInEditor(editor.editorKind)) return
+        if (!settings.shouldShowInEditor(editor.editorKind, editor.project)) return
 
         val controller = CurrentScopeIndentGuideController(editor)
         controllers[editor] = controller
@@ -144,7 +157,7 @@ class IndentScopeService : Disposable {
         // Editor-type filters can change while editors of that kind are already
         // open. Dispose the controllers that are no longer wanted so they also
         // restore the native indent guides, then register the newly enabled ones.
-        val disabled = controllers.filterKeys { !settings.shouldShowInEditor(it.editorKind) }
+        val disabled = controllers.filterKeys { !settings.shouldShowInEditor(it.editorKind, it.project) }
         disabled.forEach { (editor, controller) ->
             controllers.remove(editor, controller)
             controller.dispose()

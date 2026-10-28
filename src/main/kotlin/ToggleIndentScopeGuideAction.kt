@@ -11,10 +11,10 @@ import com.intellij.openapi.project.DumbAware
 class ToggleIndentScopeGuideAction : ToggleAction(), DumbAware {
 
     override fun isSelected(event: AnActionEvent): Boolean =
-        IndentScopeService.getInstance().enabled
+        IndentScopeService.getInstance().isEnabled(event.project)
 
     override fun setSelected(event: AnActionEvent, state: Boolean) {
-        IndentScopeService.getInstance().enabled = state
+        IndentScopeService.getInstance().setEnabled(event.project, state)
     }
 
     override fun update(event: AnActionEvent) {

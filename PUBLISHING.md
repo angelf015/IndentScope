@@ -117,10 +117,12 @@ the scope through its closing }, ) or ].
 It supports nested blocks, multi-line parentheses and brackets. Native indent guides are hidden only while the custom
 guide is active, and each editor's original setting is restored when the feature is disabled. The guide also copes with
 collapsed folds, soft-wrapped lines, multiple carets and HiDPI displays, and it can optionally appear in console, diff
-and preview editors.
+and preview editors. Enclosing-scope guides are optional and dim each parent level, and scope changes can fade over
+150 ms.
 
 Customize scope types, stroke width, corner radius, native-guide behavior, auxiliary editor types and the guide color in
-Settings → Tools → IndentScope. The color is theme-aware and can also be changed in
+Settings → Tools → IndentScope. Global settings can be overridden per project with inheritance enabled by default. The
+color is theme-aware and can also be changed in
 Settings → Editor → Color Scheme → IndentScope. The status bar includes a quick toggle, and the UI is available in
 English and Spanish.
 
@@ -149,12 +151,14 @@ que abre el ámbito hasta su cierre }, ) o ].
 Admite bloques anidados, paréntesis y corchetes de varias líneas. Las guías de indentación nativas se ocultan solo
 mientras la guía personalizada está activa, y la configuración original de cada editor se restaura al desactivar la
 función. La guía también responde a pliegues contraídos, líneas ajustadas, varios cursores y pantallas HiDPI, y puede
-aparecer opcionalmente en editores de consola, de diferencias y de vista previa.
+aparecer opcionalmente en editores de consola, de diferencias y de vista previa. Las guías de ámbitos contenedores son
+opcionales y atenúan cada nivel padre, y los cambios de ámbito pueden fundirse en 150 ms.
 
 Configura los tipos de ámbito, el grosor, el radio, el comportamiento de las guías nativas, los tipos de editor
-auxiliares y el color de la guía en Ajustes → Herramientas → IndentScope. El color se adapta al tema y también se puede
-cambiar en Ajustes → Editor → Esquema de colores → IndentScope. La barra de estado incluye un interruptor rápido y la
-interfaz está disponible en inglés y español.
+auxiliares y el color de la guía en Ajustes → Herramientas → IndentScope. La configuración global se puede sustituir por
+proyecto, con la herencia activada por defecto. El color se adapta al tema y también se puede cambiar en
+Ajustes → Editor → Esquema de colores → IndentScope. La barra de estado incluye un interruptor rápido y la interfaz está
+disponible en inglés y español.
 
 Actívala o desactívala con Ctrl+Alt+G (Cmd+Option+G en macOS), desde Ver → Apariencia → Guía de IndentScope, mediante el
 widget de la barra de estado o con el ID de acción estable IndentScope.ToggleGuide en IdeaVim.
@@ -176,7 +180,7 @@ Requiere JDK 21 (el build declara el toolchain explícitamente).
 ./gradlew verifyPlugin
 ```
 
-El build ejecuta **99 tests** (69 de plataforma/integración, 25 puros, 3 de rendimiento y 2 de bundles) y ktlint.
+El build ejecuta **116 tests** (81 de plataforma/integración, 30 puros, 3 de rendimiento y 2 de bundles) y ktlint.
 Resultado esperado de `verifyPlugin`:
 
 ```
@@ -341,6 +345,7 @@ Cuando la versión esté aprobada:
 - [ ] Ejecutar `./gradlew koverHtmlReport koverVerify` y comprobar que la cobertura no baja del 80 %.
 - [ ] Ejecutar `./gradlew verifyPlugin` y, en releases, `./gradlew verifyPlugin -PverifyAndroidStudio`.
 - [ ] Inspeccionar el ZIP: versión, change notes, `pluginIcon.svg`, `pluginIcon_dark.svg` y ausencia de `docs/images/`.
+- [ ] Comprobar que el repositorio no incluye un `.idea/indentScopeProject.xml` con ajustes locales del proyecto.
 - [ ] Firmar con `./gradlew signPlugin` si usas certificado.
 - [ ] Actualizar capturas, GIF y README si cambió la interfaz.
 - [ ] Crear commit, tag y release en GitHub.

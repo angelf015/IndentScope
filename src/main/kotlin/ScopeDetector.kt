@@ -92,10 +92,32 @@ internal class ScopeDetector(
     private val tabSize = tabSize.coerceAtLeast(1)
     private val lineCount = lines.lineCount
 
-    fun findGuide(caretLine: Int): ScopeGuide? {
-        if (lineCount == 0) return null
+    fun findGuide(caretLine: Int): ScopeGuide? = findGuides(caretLine, limit = 1).firstOrNull()
 
-        var baseLine = findNearestNonBlankLine(caretLine.coerceIn(0, lineCount - 1)) ?: return null
+    /**
+     * Returns the guide of the innermost enabled scope followed by its enclosing
+     * scopes, up to [limit]. The first element is the same guide that [findGuide]
+     * returns. Disabled scope types are skipped, so every returned guide belongs to
+     * an enabled type.
+     */
+    fun findGuides(caretLine: Int, limit: Int): List<ScopeGuide> {
+        if (lineCount == 0 || limit <= 0) return emptyList()
+
+        val guides = mutableListOf<ScopeGuide>()
+        var searchLine: Int? = caretLine.coerceIn(0, lineCount - 1)
+        while (searchLine != null && guides.size < limit) {
+            val guide = findSingleGuide(searchLine) ?: break
+            // Walking above the anchor line must always find an outer scope. The
+            // guard protects custom line maps from returning the same guide twice.
+            if (guides.lastOrNull() == guide) break
+            guides += guide
+            searchLine = findPreviousNonBlankLine(guide.anchorLine)
+        }
+        return guides
+    }
+
+    private fun findSingleGuide(caretLine: Int): ScopeGuide? {
+        var baseLine = findNearestNonBlankLine(caretLine) ?: return null
 
         while (true) {
             val baseIndent = leadingIndentOrBlank(baseLine)
@@ -212,14 +234,59 @@ internal class ScopeDetector(
      * When the indentation scan selects the `) {` line of a declaration whose
      * parameters span several lines, walk back to the parenthesis that owns it so
      * the guide still starts on the `public`/`private` line.
+     *
+     * The closing parenthesis is not always the first token of that line: the last
+     * parameter can share it (`TicketRepository ticketRepository) {`). In that case
+     * the scan below anchors the guide on the continuation line itself, which paints
+     * it over the parameter text, so the matching opener must be resolved from the
+     * brace that closes the line instead.
      */
     private fun adjustOpenerLine(line: Int): Int {
         val firstOffset = firstSignificantOffset(line) ?: return line
         val first = chars[firstOffset]
-        if (first != ')' && first != ']') return line
+        if (first != ')' && first != ']') {
+            val brace = brackets.lastUnmatchedOpenerOnLine(line)
+            if (brace?.char == '{') {
+                braceContinuationOpenerLine(brace)?.let { return it }
+            }
+            return line
+        }
 
         val openerOffset = brackets.matchingOpener(firstOffset) ?: return line
         return lines.lineNumber(openerOffset)
+    }
+
+    /**
+     * Line of the parenthesis/bracket that a brace belongs to when that construct
+     * started on an earlier line. The scan walks left from the brace over optional
+     * declaration suffixes (`throws`, `->`, return types), so a multi-line signature
+     * such as `TicketRepository ticketRepository) throws X {` anchors on the
+     * declaration line instead of the continuation row. Member-access chains and
+     * new statements stop the scan: their brace belongs to the current line.
+     */
+    private fun braceContinuationOpenerLine(brace: BracketOpener): Int? {
+        val line = lines.lineNumber(brace.offset)
+        val lineStart = lines.lineStartOffset(line)
+
+        var offset = brace.offset - 1
+        while (offset >= lineStart) {
+            val ch = chars[offset]
+            when {
+                ch.isWhitespace() -> offset--
+                ch == ')' || ch == ']' -> {
+                    val opener = brackets.matchingOpener(offset)
+                    if (opener != null) {
+                        val openerLine = lines.lineNumber(opener)
+                        if (openerLine < line) return openerLine
+                    }
+                    offset--
+                }
+
+                ch == '.' || ch == '{' || ch == '}' || ch == ';' || ch == '(' || ch == '[' -> return null
+                else -> offset--
+            }
+        }
+        return null
     }
 
     /**
