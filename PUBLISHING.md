@@ -3,8 +3,9 @@
 Guía para publicar IndentScope en GitHub y en JetBrains Marketplace. Todos los comandos se ejecutan desde la raíz del
 repositorio.
 
-> La versión **1.3.0** ya fue publicada y aprobada en JetBrains Marketplace. Esta guía queda como referencia para la
-> próxima versión: actualiza los números de versión de los ejemplos antes de usarla y no reutilices `1.3.0`.
+> La versión **1.3.0** ya fue publicada y aprobada en JetBrains Marketplace. Esta guía está preparada para la **1.4.0**:
+> revisa que el número coincida con `gradle.properties` antes de usarla y no reutilices artefactos de versiones
+> anteriores.
 
 > El plugin está publicado en JetBrains Marketplace como **IndentScope** (ID `35438`, XML ID
 > `com.access.IndentScope`) con licencia Apache 2.0. Las siguientes versiones se suben como **actualización**, no como
@@ -91,7 +92,7 @@ El IDE elige la variante oscura automáticamente. Ambos archivos deben viajar de
 compilar:
 
 ```bash
-unzip -l build/libs/IndentScope-1.3.0.jar | grep pluginIcon
+unzip -l build/libs/IndentScope-1.4.0.jar | grep pluginIcon
 ```
 
 Marketplace usa `pluginIcon.svg` como icono principal de la ficha.
@@ -180,7 +181,7 @@ Requiere JDK 21 (el build declara el toolchain explícitamente).
 ./gradlew verifyPlugin
 ```
 
-El build ejecuta **116 tests** (81 de plataforma/integración, 30 puros, 3 de rendimiento y 2 de bundles) y ktlint.
+El build ejecuta **120 tests** (82 de plataforma/integración, 33 puros, 3 de rendimiento y 2 de bundles) y ktlint.
 Resultado esperado de `verifyPlugin`:
 
 ```
@@ -188,8 +189,11 @@ IC-252.28539.97 (IntelliJ IDEA 2025.2.6.3): Compatible
 IU-253.33813.55 (IntelliJ IDEA 2025.3.6.1): Compatible
 IU-261.27258.48 (IntelliJ IDEA 2026.1.5): Compatible
 IU-262.10968.63 (IntelliJ IDEA 2026.2.3): Compatible
+AI-262.9437.185.2621.16467767 (Android Studio 2026.2.1.8): Compatible
 Dynamic Plugin Eligibility: Plugin can probably be enabled or disabled without IDE restart
 ```
+
+La línea de Android Studio solo aparece al ejecutar con `-PverifyAndroidStudio`.
 
 Para incluir Android Studio (descarga un instalador de ~1,5 GB):
 
@@ -209,7 +213,7 @@ y `koverVerify` falla el build si baja del 80 %.
 El ZIP se genera en:
 
 ```
-build/distributions/IndentScope-1.3.0.zip
+build/distributions/IndentScope-1.4.0.zip
 ```
 
 > `buildPlugin` sobrescribe ese archivo. Si conservas el ZIP de una versión ya publicada, copia el artefacto y su hash
@@ -223,7 +227,7 @@ Antes de subirlo, pruébalo con **Settings → Plugins → Install Plugin from D
 La versión se define en `gradle.properties` y debe coincidir con la sección superior de `CHANGELOG.md`:
 
 ```properties
-version=1.3.0
+version=1.4.0
 ```
 
 El changelog se inserta automáticamente en `plugin.xml` como `<change-notes>` durante `patchPluginXml`. No publiques dos
@@ -237,20 +241,26 @@ Genera el certificado fuera del repositorio y no lo subas nunca a Git:
 
 ```bash
 mkdir -p ~/keystores/IndentScope
+chmod 700 ~/keystores/IndentScope
 cd ~/keystores/IndentScope
 
 openssl genpkey -aes-256-cbc -algorithm RSA -out private_encrypted.pem -pkeyopt rsa_keygen_bits:4096
-openssl rsa -in private_encrypted.pem -out private.pem
-openssl req -key private.pem -new -x509 -days 3650 -out chain.crt
+chmod 600 private_encrypted.pem
+openssl req -key private_encrypted.pem -new -x509 -sha256 -days 3650 \
+  -out chain.crt -subj "/CN=IndentScope/O=NeoPlus"
 ```
 
-El plugin Gradle lee estas variables de entorno automáticamente:
+La clave permanece cifrada; no hace falta descifrarla en disco. El plugin Gradle lee estas variables de entorno
+automáticamente:
 
 ```bash
-export CERTIFICATE_CHAIN="$(cat chain.crt)"
-export PRIVATE_KEY="$(cat private.pem)"
-export PRIVATE_KEY_PASSWORD='la-contraseña-elegida'
+export CERTIFICATE_CHAIN="$(cat ~/keystores/IndentScope/chain.crt)"
+export PRIVATE_KEY="$(cat ~/keystores/IndentScope/private_encrypted.pem)"
+export PRIVATE_KEY_PASSWORD="$KEYJET"
 ```
+
+`$KEYJET` es solo un ejemplo de variable: guarda la contraseña en tu gestor de secretos y nunca la escribas en el
+repositorio ni en `gradle.properties`.
 
 Firma y verifica:
 
@@ -263,7 +273,7 @@ cd /Users/arch/workspace/java/IndentScope
 Cuando `signPlugin` está configurado, el ZIP firmado se genera junto al original con el sufijo `-signed`:
 
 ```
-build/distributions/IndentScope-1.3.0-signed.zip
+build/distributions/IndentScope-1.4.0-signed.zip
 ```
 
 Ese es el archivo que debes subir al Marketplace. Si no quieres firmar todavía, sube el ZIP sin firmar; el Marketplace lo
@@ -277,24 +287,25 @@ Revisa los cambios y crea el commit:
 git status
 git diff
 
-git add .
-git commit -m "Release 1.3.0: settings, visual robustness and personalized guide"
+# Añade solo los archivos de la release; no incluyas capturas locales como newIssue.png.
+git add CHANGELOG.md PUBLISHING.md README.md README.es.md TODO.md gradle.properties
+git commit -m "Release 1.4.0: performance, project settings and visual polish"
 git push origin main
 ```
 
 Crea la etiqueta y súbela:
 
 ```bash
-git tag -a v1.3.0 -m "IndentScope 1.3.0"
-git push origin v1.3.0
+git tag -a v1.4.0 -m "IndentScope 1.4.0"
+git push origin v1.4.0
 ```
 
 Después, en GitHub:
 
 1. Abre **Releases → Draft a new release**.
-2. Selecciona la etiqueta `v1.3.0`.
-3. Título: `IndentScope 1.3.0`.
-4. Pega la sección `[1.3.0]` de `CHANGELOG.md` como notas.
+2. Selecciona la etiqueta `v1.4.0`.
+3. Título: `IndentScope 1.4.0`.
+4. Pega la sección `[1.4.0]` de `CHANGELOG.md` como notas.
 5. Adjunta el ZIP de `build/distributions/`.
 6. Publica la release.
 
@@ -310,11 +321,11 @@ La subida de una versión se hace manualmente:
 1. Inicia sesión en [JetBrains Marketplace](https://plugins.jetbrains.com/author/me) con tu JetBrains Account.
 2. Abre la página del plugin **IndentScope** y pulsa **Upload new version**.
 3. Rellena el formulario de la versión:
-   - **Version**: `1.3.0`
+   - **Version**: `1.4.0`
    - **Since build**: `252`
    - **Until build**: vacío (compatible con todas las versiones posteriores)
    - **Channel**: vacío (canal estable)
-   - **Change notes**: copia la sección `[1.3.0]` de `CHANGELOG.md`
+   - **Change notes**: copia la sección `[1.4.0]` de `CHANGELOG.md`
 4. Sube el ZIP firmado (o el ZIP sin firmar si aún no firmas).
 5. Envía la versión a revisión.
 

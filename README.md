@@ -89,7 +89,7 @@ You can also open the [Marketplace page](https://plugins.jetbrains.com/plugin/35
 
 From a downloaded ZIP:
 
-1. Download `IndentScope-1.3.0.zip` from the
+1. Download `IndentScope-1.4.0.zip` from the
    [Marketplace versions page](https://plugins.jetbrains.com/plugin/35438-indentscope/versions) or from the
    [GitHub releases page](https://github.com/angelf015/IndentScope/releases) once a release is published.
 2. Open **Settings → Plugins**, click the gear icon → **Install Plugin from Disk...**, and select the ZIP.
@@ -253,7 +253,7 @@ Requirements: JDK 21. The Gradle wrapper downloads the rest, and the build decla
 The `build` task also runs ktlint through the `check` lifecycle. The installable ZIP is generated at:
 
 ```
-build/distributions/IndentScope-1.3.0.zip
+build/distributions/IndentScope-1.4.0.zip
 ```
 
 Install it from **Settings → Plugins → Install Plugin from Disk**.
@@ -306,7 +306,7 @@ check that it avoids both boundary lines, project settings inheritance and full 
 their fading, and the animated transition. A separate pure test suite covers the scope detector, fold visibility,
 editor-kind filtering and soft-wrap path segmentation without starting the IDE, and a performance suite verifies index
 reuse and guide resolution in files with 80 000–100 000 lines. A bundle test checks the English and Spanish resources.
-The suite currently has **116 tests** (81 platform/integration, 30 pure, 3 performance and 2 bundle tests).
+The suite currently has **120 tests** (82 platform/integration, 33 pure, 3 performance and 2 bundle tests).
 
 ## CI and quality
 

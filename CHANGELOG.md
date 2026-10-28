@@ -2,7 +2,7 @@
 
 # IndentScope Changelog
 
-## [Unreleased]
+## [1.4.0] - 2026-10-27
 
 ### Added
 
@@ -18,7 +18,8 @@
   for scopes that start at column 0** setting is off by default and can be enabled in **Settings → Tools →
   IndentScope**.
 - CI matrix on Ubuntu, macOS and Windows, Gradle wrapper validation, ktlint and Kover coverage reports.
-- Compatibility verification against IntelliJ IDEA 2025.3.6.1, 2026.1.5 and Android Studio 2026.2.1.8.
+- Compatibility verification against IntelliJ IDEA 2025.2.6.3, 2025.3.6.1, 2026.1.5, 2026.2.3 and Android Studio
+  2026.2.1.8.
 - Demo GIF and screenshots in the README, plus a full Spanish README (`README.es.md`).
 - Separate light and dark plugin icons (`pluginIcon.svg` and `pluginIcon_dark.svg`).
 - Bilingual plugin description with documentation and issue-tracker links.
@@ -42,6 +43,12 @@
 - The `RangeHighlighter` is reused while the scope range is unchanged, and style changes update its renderer in place.
 - Controller bookkeeping is confined to the EDT with a concurrent registry, and disposed editors are pruned.
 - Large-file scans have safety limits, and performance regression tests cover index reuse and very large files.
+
+### Fixed
+
+- A multi-line signature now anchors the guide on the declaration line when the opening brace shares a continuation row with
+  the last parameter or a declaration suffix such as `throws` (`TicketRepository ticketRepository) {`). Previously the
+  guide started on that row and its vertical stroke crossed the parameter and body text.
 
 ## [1.3.0] - 2026-10-26
 
@@ -81,9 +88,6 @@
 
 - The guide now reaches the closing `}` of a method or constructor whose declaration spans multiple lines, instead of
   stopping at the last body line.
-- A multi-line signature now anchors the guide on the declaration line when the opening brace shares a continuation row with
-  the last parameter or a declaration suffix such as `throws` (`TicketRepository ticketRepository) {`). Previously the
-  guide started on that row and its vertical stroke crossed the parameter and body text.
 - Classes without methods, such as Lombok DTOs, now show their class-level guide.
 - Column-0 guides no longer draw the tiny one-pixel end arms, which looked like stray dots. They are now plain vertical
   lines that start just below the opener line and end just above the closing line, so they never overlap the

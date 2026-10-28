@@ -92,7 +92,7 @@ También puedes abrir directamente la [página de Marketplace](https://plugins.j
 
 Desde un ZIP descargado:
 
-1. Descarga `IndentScope-1.3.0.zip` desde la
+1. Descarga `IndentScope-1.4.0.zip` desde la
    [página de versiones de Marketplace](https://plugins.jetbrains.com/plugin/35438-indentscope/versions) o desde la
    [página de versiones de GitHub](https://github.com/angelf015/IndentScope/releases) cuando haya una release publicada.
 2. Abre **Ajustes → Plugins**, pulsa el icono de engranaje → **Instalar plugin desde el disco...** y selecciona el ZIP.
@@ -262,7 +262,7 @@ Requisitos: JDK 21. El wrapper de Gradle descarga el resto y la compilación dec
 La tarea `build` también ejecuta ktlint a través del ciclo de vida `check`. El ZIP instalable se genera en:
 
 ```
-build/distributions/IndentScope-1.3.0.zip
+build/distributions/IndentScope-1.4.0.zip
 ```
 
 Instálalo desde **Ajustes → Plugins → Instalar plugin desde el disco**.
